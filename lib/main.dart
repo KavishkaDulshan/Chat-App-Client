@@ -1,34 +1,35 @@
 import 'package:flutter/material.dart';
-// ignore: library_prefixes
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 
 void main() {
-  runApp(const MaterialApp(home: ChatScreen()));
+  runApp(
+    const MaterialApp(debugShowCheckedModeBanner: false, home: LoginScreen()),
+  );
 }
 
-class ChatScreen extends StatefulWidget {
-  const ChatScreen({super.key});
+// -----------------------------------
+// SCREEN 1: THE LOGIN PAGE
+// -----------------------------------
+class LoginScreen extends StatefulWidget {
+  const LoginScreen({super.key});
 
   @override
-  // ignore: library_private_types_in_public_api
-  _ChatScreenState createState() => _ChatScreenState();
+  _LoginScreenState createState() => _LoginScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> {
+class _LoginScreenState extends State<LoginScreen> {
+  final TextEditingController _usernameController = TextEditingController();
   late IO.Socket socket;
-  final TextEditingController _controller = TextEditingController();
-  final List<String> _messages = []; // Stores our chat history locally
+  bool _isLoading = false;
 
-  @override
-  void initState() {
-    super.initState();
-    connectToServer();
-  }
+  void connectAndLogin() {
+    if (_usernameController.text.isEmpty) return;
 
-  void connectToServer() {
-    // 1. Connection Logic
-    // IF TESTING ON ANDROID EMULATOR: Use 'http://10.0.2.2:3000'
-    // IF TESTING ON WINDOWS/WEB: Use 'http://localhost:3000'
+    setState(() => _isLoading = true);
+
+    // 1. Initialize Socket
+    // NOTE: Use 'http://10.0.2.2:3000' for Android Emulator
+    // NOTE: Use 'http://localhost:3000' for Windows Desktop
     socket = IO.io('http://localhost:3000', <String, dynamic>{
       'transports': ['websocket'],
       'autoConnect': false,
@@ -36,68 +37,214 @@ class _ChatScreenState extends State<ChatScreen> {
 
     socket.connect();
 
-    // 2. Listen for Connection Success
+    // 2. Listen for connection
     socket.onConnect((_) {
-      print('✅ Connected to Backend');
+      print('✅ Connected to Server');
+      // 3. Emit the 'login' event we wrote in Node.js
+      socket.emit('login', _usernameController.text.trim());
     });
 
-    // 3. Listen for Incoming Messages
-    socket.on('chat_message', (data) {
-      print('📩 Received: $data');
-      setState(() {
-        _messages.add(data);
-      });
+    // 4. Listen for 'login_success' from Server
+    socket.on('login_success', (userData) {
+      print('🔓 Login Success: $userData');
+      setState(() => _isLoading = false);
+
+      // Navigate to Chat Screen and pass the socket & user data
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (context) => ChatScreen(
+            socket: socket,
+            username: _usernameController.text,
+            userId: userData['_id'], // MongoDB _id
+          ),
+        ),
+      );
     });
 
-    // 4. Handle Disconnect
-    socket.onDisconnect((_) => print('❌ Disconnected'));
+    // Handle errors (optional but good practice)
+    socket.onDisconnect((_) {
+      setState(() => _isLoading = false);
+      print('❌ Disconnected');
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text("Join Chat")),
+      body: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            TextField(
+              controller: _usernameController,
+              decoration: const InputDecoration(
+                labelText: "Enter your nickname",
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 20),
+            _isLoading
+                ? const CircularProgressIndicator()
+                : ElevatedButton(
+                    onPressed: connectAndLogin,
+                    child: const Text("Enter Chat Room"),
+                  ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// -----------------------------------
+// SCREEN 2: THE CHAT ROOM
+// -----------------------------------
+class ChatScreen extends StatefulWidget {
+  final IO.Socket socket;
+  final String username;
+  final String userId;
+
+  const ChatScreen({
+    super.key,
+    required this.socket,
+    required this.username,
+    required this.userId,
+  });
+
+  @override
+  _ChatScreenState createState() => _ChatScreenState();
+}
+
+class _ChatScreenState extends State<ChatScreen> {
+  final TextEditingController _messageController = TextEditingController();
+  final List<Map<String, dynamic>> _messages = [];
+
+  @override
+  void initState() {
+    super.initState();
+    setupSocketListeners();
+  }
+
+  void setupSocketListeners() {
+    // 1. Listen for incoming new messages
+    widget.socket.on('chat_message', (data) {
+      if (mounted) {
+        setState(() {
+          _messages.add(data);
+        });
+      }
+    });
+
+    // 2. Listen for HISTORY load (New)
+    widget.socket.on('history_load', (data) {
+      // The data comes as a List of Maps. We need to cast it.
+      if (mounted) {
+        setState(() {
+          // Clear current list just in case
+          _messages.clear();
+          // Add all historical messages
+          for (var msg in data) {
+            _messages.add(msg);
+          }
+        });
+        print("📜 History Loaded: ${_messages.length} messages");
+      }
+    });
   }
 
   void sendMessage() {
-    if (_controller.text.isNotEmpty) {
-      // Emit the message to the server
-      socket.emit('chat_message', _controller.text);
-      _controller.clear();
+    if (_messageController.text.isNotEmpty) {
+      // We will implement the proper "Save to DB" logic next.
+      // For now, we just send the text.
+      Map<String, dynamic> msgData = {
+        'content': _messageController.text,
+        'sender_id': widget.userId,
+        'sender_name': widget.username, // Temporary for UI
+        'type': 'text',
+      };
+
+      widget.socket.emit('chat_message', msgData);
+      _messageController.clear();
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Dev Chat")),
+      appBar: AppBar(
+        title: Text("Chat as ${widget.username}"),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: () {
+              widget.socket.disconnect();
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(builder: (_) => const LoginScreen()),
+              );
+            },
+          ),
+        ],
+      ),
       body: Column(
         children: [
-          // Message List
           Expanded(
             child: ListView.builder(
               itemCount: _messages.length,
               itemBuilder: (context, index) {
-                return ListTile(
-                  title: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: Colors.blue[100],
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text(_messages[index]),
+                final msg = _messages[index];
+                final isMe = msg['sender_id'] == widget.userId;
+
+                return Align(
+                  alignment: isMe
+                      ? Alignment.centerRight
+                      : Alignment.centerLeft,
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(
+                      vertical: 5,
+                      horizontal: 10,
+                    ),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: isMe ? Colors.blue : Colors.grey[300],
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          msg['sender_name'] ?? 'Unknown',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            color: isMe ? Colors.white70 : Colors.black54,
+                          ),
+                        ),
+                        Text(
+                          msg['content'] ?? '',
+                          style: TextStyle(
+                            color: isMe ? Colors.white : Colors.black,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 );
               },
             ),
           ),
-          // Input Field
           Padding(
             padding: const EdgeInsets.all(8.0),
             child: Row(
               children: [
                 Expanded(
                   child: TextField(
-                    controller: _controller,
+                    controller: _messageController,
                     decoration: const InputDecoration(
-                      labelText: "Type a message...",
+                      hintText: "Type a message...",
                     ),
                   ),
                 ),
