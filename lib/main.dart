@@ -53,10 +53,10 @@ class _LoginScreenState extends State<LoginScreen> {
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (context) => ChatScreen(
+          builder: (context) => UserListScreen(
+            // <--- CHANGED THIS
             socket: socket,
-            username: _usernameController.text,
-            userId: userData['_id'], // MongoDB _id
+            currentUser: userData,
           ),
         ),
       );
@@ -256,6 +256,94 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class UserListScreen extends StatefulWidget {
+  final IO.Socket socket;
+  final Map<String, dynamic> currentUser;
+
+  const UserListScreen({
+    super.key,
+    required this.socket,
+    required this.currentUser,
+  });
+
+  @override
+  _UserListScreenState createState() => _UserListScreenState();
+}
+
+class _UserListScreenState extends State<UserListScreen> {
+  List<dynamic> _users = [];
+
+  @override
+  void initState() {
+    super.initState();
+    // 1. Ask server for the list
+    widget.socket.emit('get_users');
+
+    // 2. Listen for the list response
+    widget.socket.on('users_list', (data) {
+      if (mounted) setState(() => _users = data);
+    });
+
+    // 3. Listen for real-time status updates (Online/Offline)
+    widget.socket.on('user_status_change', (data) {
+      if (mounted) {
+        setState(() {
+          // Find the user in our list and update their status
+          final index = _users.indexWhere((u) => u['_id'] == data['userId']);
+          if (index != -1) {
+            _users[index]['is_online'] = data['isOnline'];
+          }
+        });
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text("Contacts"),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: () => Navigator.of(context).pop(), // Simple logout
+          ),
+        ],
+      ),
+      body: ListView.builder(
+        itemCount: _users.length,
+        itemBuilder: (context, index) {
+          final user = _users[index];
+          final isOnline = user['is_online'] ?? false;
+
+          return ListTile(
+            leading: CircleAvatar(
+              backgroundColor: isOnline ? Colors.green : Colors.grey,
+              child: const Icon(Icons.person, color: Colors.white),
+            ),
+            title: Text(user['username']),
+            subtitle: Text(isOnline ? "Online" : "Offline"),
+            onTap: () {
+              // FOR NOW: We still just open the Global Chat.
+              // NEXT STEP: We will pass 'user["_id"]' to open a private room.
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => ChatScreen(
+                    socket: widget.socket,
+                    username: widget.currentUser['username'],
+                    userId: widget.currentUser['_id'],
+                  ),
+                ),
+              );
+            },
+          );
+        },
       ),
     );
   }
