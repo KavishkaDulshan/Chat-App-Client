@@ -106,12 +106,16 @@ class ChatScreen extends StatefulWidget {
   final IO.Socket socket;
   final String username;
   final String userId;
+  final String roomId; // NEW
+  final List<Map<String, dynamic>> initialHistory; // NEW
 
   const ChatScreen({
     super.key,
     required this.socket,
     required this.username,
     required this.userId,
+    required this.roomId,
+    required this.initialHistory,
   });
 
   @override
@@ -125,11 +129,17 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
+
+    // 1. Load History Immediately (Passed from UserListScreen)
+    // We use .addAll() to put the history into our local list
+    _messages.addAll(widget.initialHistory);
+
+    // 2. Start listening for NEW messages
     setupSocketListeners();
   }
 
   void setupSocketListeners() {
-    // 1. Listen for incoming new messages
+    // Listen for incoming messages from the server
     widget.socket.on('chat_message', (data) {
       if (mounted) {
         setState(() {
@@ -137,36 +147,21 @@ class _ChatScreenState extends State<ChatScreen> {
         });
       }
     });
-
-    // 2. Listen for HISTORY load (New)
-    widget.socket.on('history_load', (data) {
-      // The data comes as a List of Maps. We need to cast it.
-      if (mounted) {
-        setState(() {
-          // Clear current list just in case
-          _messages.clear();
-          // Add all historical messages
-          for (var msg in data) {
-            _messages.add(msg);
-          }
-        });
-        print("📜 History Loaded: ${_messages.length} messages");
-      }
-    });
   }
 
   void sendMessage() {
     if (_messageController.text.isNotEmpty) {
-      // We will implement the proper "Save to DB" logic next.
-      // For now, we just send the text.
+      // Create the message payload
       Map<String, dynamic> msgData = {
         'content': _messageController.text,
-        'sender_id': widget.userId,
-        'sender_name': widget.username, // Temporary for UI
-        'type': 'text',
+        'roomId': widget
+            .roomId, // <--- CRITICAL: We tell server which room this is for
       };
 
+      // Emit to server
       widget.socket.emit('chat_message', msgData);
+
+      // Clear input
       _messageController.clear();
     }
   }
@@ -174,23 +169,10 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text("Chat as ${widget.username}"),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout),
-            onPressed: () {
-              widget.socket.disconnect();
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(builder: (_) => const LoginScreen()),
-              );
-            },
-          ),
-        ],
-      ),
+      appBar: AppBar(title: Text("Chatting as ${widget.username}")),
       body: Column(
         children: [
+          // THE MESSAGE LIST
           Expanded(
             child: ListView.builder(
               itemCount: _messages.length,
@@ -215,6 +197,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        // Show Sender Name (Optional, but helpful)
                         Text(
                           msg['sender_name'] ?? 'Unknown',
                           style: TextStyle(
@@ -223,6 +206,7 @@ class _ChatScreenState extends State<ChatScreen> {
                             color: isMe ? Colors.white70 : Colors.black54,
                           ),
                         ),
+                        // Show Message Content
                         Text(
                           msg['content'] ?? '',
                           style: TextStyle(
@@ -236,6 +220,8 @@ class _ChatScreenState extends State<ChatScreen> {
               },
             ),
           ),
+
+          // THE INPUT FIELD
           Padding(
             padding: const EdgeInsets.all(8.0),
             child: Row(
@@ -329,18 +315,31 @@ class _UserListScreenState extends State<UserListScreen> {
             title: Text(user['username']),
             subtitle: Text(isOnline ? "Online" : "Offline"),
             onTap: () {
-              // FOR NOW: We still just open the Global Chat.
-              // NEXT STEP: We will pass 'user["_id"]' to open a private room.
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => ChatScreen(
-                    socket: widget.socket,
-                    username: widget.currentUser['username'],
-                    userId: widget.currentUser['_id'],
+              // 1. Tell server we want to chat with this person
+              widget.socket.emit('join_private_chat', user['_id']);
+
+              // 2. Wait for server to say "Room Ready"
+              // We set up a ONE-TIME listener for this event
+              widget.socket.once('private_chat_ready', (data) {
+                final roomId = data['roomId'];
+                final history = List<Map<String, dynamic>>.from(
+                  data['history'],
+                );
+
+                // 3. Navigate to Chat Screen with the Room ID and History
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ChatScreen(
+                      socket: widget.socket,
+                      username: widget.currentUser['username'],
+                      userId: widget.currentUser['_id'],
+                      roomId: roomId, // New Param
+                      initialHistory: history, // New Param
+                    ),
                   ),
-                ),
-              );
+                );
+              });
             },
           );
         },
