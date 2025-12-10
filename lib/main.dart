@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
+import 'dart:async'; // Required for the Timer
+import 'package:intl/intl.dart';
 
 void main() {
   runApp(
@@ -125,6 +127,9 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _messageController = TextEditingController();
   final List<Map<String, dynamic>> _messages = [];
+  bool _isTyping = false;
+  String _typingUser = '';
+  Timer? _typingTimer; // Need 'dart:async'
 
   @override
   void initState() {
@@ -134,7 +139,11 @@ class _ChatScreenState extends State<ChatScreen> {
     // We use .addAll() to put the history into our local list
     _messages.addAll(widget.initialHistory);
 
-    // 2. Start listening for NEW messages
+    // 2. NEW: Safety Re-Join
+    // Ensure we are in the room, even if the socket reconnected
+    widget.socket.emit('join_room', widget.roomId);
+
+    // 3. Start listening for NEW messages
     setupSocketListeners();
   }
 
@@ -147,6 +156,42 @@ class _ChatScreenState extends State<ChatScreen> {
         });
       }
     });
+
+    void setupSocketListeners() {
+      // 1. Existing Chat Message Listener
+      widget.socket.on('chat_message', (data) {
+        if (mounted) {
+          setState(() {
+            _messages.add(data);
+          });
+        }
+      });
+
+      // 2. TYPING LISTENER (Update this part)
+      widget.socket.on('display_typing', (data) {
+        // --- ADD THIS PRINT ---
+        print("🔔 CLIENT HEARD: Someone is typing!");
+
+        if (mounted) {
+          setState(() {
+            _isTyping = true;
+            _typingUser = data['username'];
+          });
+        }
+      });
+
+      // 3. STOP TYPING LISTENER (Update this part)
+      widget.socket.on('hide_typing', (_) {
+        // --- ADD THIS PRINT ---
+        print("🔕 CLIENT HEARD: They stopped.");
+
+        if (mounted) {
+          setState(() {
+            _isTyping = false;
+          });
+        }
+      });
+    }
   }
 
   void sendMessage() {
@@ -166,8 +211,36 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  String _formatTime(String? isoString) {
+    if (isoString == null) return "Now";
+    try {
+      final DateTime date = DateTime.parse(
+        isoString,
+      ).toLocal(); // Convert to local time
+      return DateFormat('jm').format(date); // Formats as "5:08 PM"
+    } catch (e) {
+      return "";
+    }
+  }
+
+  void _onTextChanged(String text) {
+    // 1. Tell server "I am typing"
+    // We send this every time a key is pressed
+    widget.socket.emit('typing', widget.roomId);
+
+    // 2. Reset the countdown
+    if (_typingTimer?.isActive ?? false) _typingTimer!.cancel();
+
+    // 3. Start a new 2-second countdown
+    // If the user stops typing, this timer will finish and send "stop_typing"
+    _typingTimer = Timer(const Duration(milliseconds: 2000), () {
+      widget.socket.emit('stop_typing', widget.roomId);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
+    print("👀 MY ROOM ID: ${widget.roomId}");
     return Scaffold(
       appBar: AppBar(title: Text("Chatting as ${widget.username}")),
       body: Column(
@@ -197,7 +270,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // Show Sender Name (Optional, but helpful)
+                        // Sender Name
                         Text(
                           msg['sender_name'] ?? 'Unknown',
                           style: TextStyle(
@@ -206,13 +279,30 @@ class _ChatScreenState extends State<ChatScreen> {
                             color: isMe ? Colors.white70 : Colors.black54,
                           ),
                         ),
-                        // Show Message Content
+
+                        // Message Content
                         Text(
                           msg['content'] ?? '',
                           style: TextStyle(
                             color: isMe ? Colors.white : Colors.black,
+                            fontSize: 16, // Slightly bigger text
                           ),
                         ),
+
+                        // --- NEW: TIMESTAMP ---
+                        const SizedBox(height: 5), // Tiny gap
+                        Align(
+                          alignment: Alignment.bottomRight,
+                          child: Text(
+                            _formatTime(msg['timestamp']), // Use our helper
+                            style: TextStyle(
+                              color: isMe ? Colors.white60 : Colors.black45,
+                              fontSize: 10,
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                        ),
+                        // ----------------------
                       ],
                     ),
                   ),
@@ -222,6 +312,28 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
 
           // THE INPUT FIELD
+          // --- 1. THE TYPING INDICATOR ---
+          // This sits comfortably between the list and the input box
+          if (_isTyping)
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 16.0,
+                vertical: 5.0,
+              ),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  "$_typingUser is typing...",
+                  style: const TextStyle(
+                    fontStyle: FontStyle.italic,
+                    color: Colors.grey,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ),
+
+          // --- 2. THE INPUT FIELD ---
           Padding(
             padding: const EdgeInsets.all(8.0),
             child: Row(
@@ -229,6 +341,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 Expanded(
                   child: TextField(
                     controller: _messageController,
+                    onChanged: _onTextChanged, // <--- LINKED HERE
                     decoration: const InputDecoration(
                       hintText: "Type a message...",
                     ),
