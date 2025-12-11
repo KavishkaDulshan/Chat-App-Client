@@ -39,6 +39,8 @@ dependencies:
   intl: ^0.20.2
   http: ^1.6.0
   flutter_secure_storage: ^10.0.0
+  flutter_riverpod: ^3.0.3
+  state_notifier: ^1.0.0
 
 dev_dependencies:
   flutter_test:
