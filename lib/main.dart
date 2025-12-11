@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'dart:async';
 import 'package:intl/intl.dart';
+import 'auth_service.dart';
 
 // Configuration
 // Use 'http://10.0.2.2:3000' for Android Emulator
@@ -15,7 +16,9 @@ void main() {
 }
 
 // -----------------------------------
-// SCREEN 1: THE LOGIN PAGE
+
+// SCREEN 1: THE AUTH SCREEN (Login & Signup)
+
 // -----------------------------------
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -25,84 +28,148 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final TextEditingController _usernameController = TextEditingController();
-  late IO.Socket socket;
+  final AuthService _authService = AuthService();
+
+  // Text Controllers
+  final TextEditingController _emailController = TextEditingController();
+  final TextEditingController _passwordController = TextEditingController();
+  final TextEditingController _usernameController =
+      TextEditingController(); // Only for signup
+
+  bool _isLoginMode = true; // Toggle between Login and Signup
   bool _isLoading = false;
+  late IO.Socket socket;
 
-  @override
-  void dispose() {
-    _usernameController.dispose();
-    super.dispose();
-  }
+  void handleAuth() async {
+    final email = _emailController.text.trim();
+    final password = _passwordController.text.trim();
+    final username = _usernameController.text.trim();
 
-  void connectAndLogin() {
-    if (_usernameController.text.isEmpty) return;
+    if (email.isEmpty || password.isEmpty) return;
+    if (!_isLoginMode && username.isEmpty) return;
 
     setState(() => _isLoading = true);
 
+    if (_isLoginMode) {
+      // --- LOGIN FLOW ---
+      final user = await _authService.login(email, password);
+
+      if (user != null) {
+        // Login success! Now connect the socket.
+        connectSocket(user);
+      } else {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Login Failed. Check credentials.")),
+        );
+      }
+    } else {
+      // --- SIGNUP FLOW ---
+      final success = await _authService.register(username, email, password);
+      if (success) {
+        // If signup works, switch to login mode automatically
+        setState(() {
+          _isLoginMode = true;
+          _isLoading = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Account Created! Please Login.")),
+        );
+      } else {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Signup Failed. Email/User might exist."),
+          ),
+        );
+      }
+    }
+  }
+
+  void connectSocket(Map<String, dynamic> user) {
     // 1. Initialize Socket
-    socket = IO.io(kServerUrl, <String, dynamic>{
+    socket = IO.io('http://localhost:3000', <String, dynamic>{
       'transports': ['websocket'],
       'autoConnect': false,
+      // OPTIONAL: We can pass the token here for extra security later
+      // 'auth': {'token': await _authService.storage.read(key: 'jwt_token')}
     });
 
     socket.connect();
 
-    // 2. Listen for connection
     socket.onConnect((_) {
-      print('✅ Connected to Server');
-      socket.emit('login', _usernameController.text.trim());
+      print('✅ Socket Connected');
+
+      // We still need to tell the socket WHO we are for the "Online Status" list
+      // We use the ID returned from the REST API
+      socket.emit('login', user['username']);
     });
 
-    // 3. Listen for Login Success
-    socket.on('login_success', (userData) {
-      print('🔓 Login Success: $userData');
-      if (mounted) {
-        setState(() => _isLoading = false);
-        // Remove login listener so it doesn't trigger again unexpectedly
-        socket.off('login_success');
+    socket.on('login_success', (_) {
+      setState(() => _isLoading = false);
 
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (context) =>
-                UserListScreen(socket: socket, currentUser: userData),
-          ),
-        );
-      }
-    });
-
-    socket.onDisconnect((_) {
-      if (mounted) {
-        setState(() => _isLoading = false);
-        print('❌ Disconnected');
-      }
+      // Navigate to Contacts
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (context) =>
+              UserListScreen(socket: socket, currentUser: user),
+        ),
+      );
     });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Join Chat")),
+      appBar: AppBar(title: Text(_isLoginMode ? "Login" : "Create Account")),
       body: Padding(
         padding: const EdgeInsets.all(20.0),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            TextField(
-              controller: _usernameController,
-              decoration: const InputDecoration(
-                labelText: "Enter your nickname",
-                border: OutlineInputBorder(),
+            // USERNAME (Only visible in Signup Mode)
+            if (!_isLoginMode)
+              TextField(
+                controller: _usernameController,
+                decoration: const InputDecoration(labelText: "Username"),
               ),
+
+            // EMAIL
+            TextField(
+              controller: _emailController,
+              decoration: const InputDecoration(labelText: "Email"),
             ),
+
+            // PASSWORD
+            TextField(
+              controller: _passwordController,
+              obscureText: true, // Hide password
+              decoration: const InputDecoration(labelText: "Password"),
+            ),
+
             const SizedBox(height: 20),
+
             _isLoading
                 ? const CircularProgressIndicator()
                 : ElevatedButton(
-                    onPressed: connectAndLogin,
-                    child: const Text("Enter Chat Room"),
+                    onPressed: handleAuth,
+                    child: Text(_isLoginMode ? "Login" : "Sign Up"),
                   ),
+
+            // TOGGLE BUTTON
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  _isLoginMode = !_isLoginMode;
+                });
+              },
+              child: Text(
+                _isLoginMode
+                    ? "Don't have an account? Sign Up"
+                    : "Already have an account? Login",
+              ),
+            ),
           ],
         ),
       ),
