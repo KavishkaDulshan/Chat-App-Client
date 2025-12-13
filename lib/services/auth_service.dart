@@ -59,4 +59,36 @@ class AuthService {
   Future<void> logout() async {
     await storage.delete(key: 'jwt_token');
   }
+
+  // ... existing code ...
+
+  // --- SEARCH USER ---
+  Future<Map<String, dynamic>?> searchUser(String username) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/search?username=$username'),
+      );
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      }
+    } catch (e) {
+      print('Search Error: $e');
+    }
+    return null;
+  }
+
+  // --- GET INBOX ---
+  Future<List<dynamic>> getConversations(String myUserId) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/conversations/$myUserId'),
+      );
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      }
+    } catch (e) {
+      print('Inbox Error: $e');
+    }
+    return [];
+  }
 }

@@ -42,16 +42,26 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final socket = ref.read(socketServiceProvider).socket;
     final myUsername = ref.read(authProvider).user?.username;
 
-    // Safety Join
+    // (Optional) We still join the room for safety, but we rely on Personal Room now
     socket.emit('join_room', widget.roomId);
 
-    // Listeners
+    // 1. Message Listener (With FILTER)
     socket.on('chat_message', (data) {
+      // --- FIX: Check if this message belongs to THIS screen ---
+      if (data['roomId'] != widget.roomId) return;
+      // ---------------------------------------------------------
+
       if (mounted) setState(() => _messages.add(data));
     });
 
+    // 2. Typing Listener (With FILTER)
     socket.on('display_typing', (data) {
-      if (data['username'] == myUsername) return; // Ignore self
+      if (data['username'] == myUsername) return;
+
+      // --- FIX: Check if the typing is for THIS screen ---
+      if (data['roomId'] != widget.roomId) return;
+      // --------------------------------------------------
+
       if (mounted) {
         setState(() {
           _isTyping = true;
@@ -60,7 +70,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       }
     });
 
-    socket.on('hide_typing', (_) {
+    // 3. Stop Typing Listener (With FILTER)
+    socket.on('hide_typing', (data) {
+      // --- FIX: Check filter ---
+      // (Note: You might need to update server to send object {roomId} for hide_typing too,
+      // currently it might send null or string. I updated server code above to send object)
+      if (data is Map && data['roomId'] != widget.roomId) return;
+
       if (mounted) setState(() => _isTyping = false);
     });
   }
@@ -70,8 +86,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     _typingTimer?.cancel();
     _messageController.dispose();
 
-    // Clean up listeners for this room
     final socket = ref.read(socketServiceProvider).socket;
+    // Remove specific listeners so they don't stack up
     socket.off('chat_message');
     socket.off('display_typing');
     socket.off('hide_typing');
