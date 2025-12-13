@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:socket_io_client/socket_io_client.dart' as IO; // Import types
 import '../providers/socket_provider.dart';
 import '../providers/auth_provider.dart';
 import '../widgets/message_bubble.dart';
@@ -29,55 +30,57 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   String _typingUser = '';
   Timer? _typingTimer;
 
+  // FIX 1: Store socket locally to avoid using 'ref' in dispose
+  late IO.Socket _socket;
+
   @override
   void initState() {
     super.initState();
     _messages.addAll(widget.initialHistory);
 
-    // We need to run this after build to safely access providers
-    Future.microtask(() => _setupSocket());
+    // FIX 2: Initialize the local socket variable immediately
+    _socket = ref.read(socketServiceProvider).socket;
+
+    // Defer the setup logic, but use the local _socket variable
+    Future.microtask(() => _setupSocketListeners());
   }
 
-  void _setupSocket() {
-    final socket = ref.read(socketServiceProvider).socket;
+  void _setupSocketListeners() {
+    // Safety check: If screen closed before this runs, stop.
+    if (!mounted) return;
+
     final myUsername = ref.read(authProvider).user?.username;
 
-    // (Optional) We still join the room for safety, but we rely on Personal Room now
-    socket.emit('join_room', widget.roomId);
+    // Safety join
+    _socket.emit('join_room', widget.roomId);
 
-    // 1. Message Listener (With FILTER)
-    socket.on('chat_message', (data) {
-      // --- FIX: Check if this message belongs to THIS screen ---
+    // 1. Message Listener
+    _socket.on('chat_message', (data) {
+      // FIX 3: Check mounted before SetState
+      if (!mounted) return;
       if (data['roomId'] != widget.roomId) return;
-      // ---------------------------------------------------------
 
-      if (mounted) setState(() => _messages.add(data));
+      setState(() => _messages.add(data));
     });
 
-    // 2. Typing Listener (With FILTER)
-    socket.on('display_typing', (data) {
+    // 2. Typing Listener
+    _socket.on('display_typing', (data) {
+      if (!mounted) return; // Safety Check
       if (data['username'] == myUsername) return;
-
-      // --- FIX: Check if the typing is for THIS screen ---
       if (data['roomId'] != widget.roomId) return;
-      // --------------------------------------------------
 
-      if (mounted) {
-        setState(() {
-          _isTyping = true;
-          _typingUser = data['username'];
-        });
-      }
+      setState(() {
+        _isTyping = true;
+        _typingUser = data['username'];
+      });
     });
 
-    // 3. Stop Typing Listener (With FILTER)
-    socket.on('hide_typing', (data) {
-      // --- FIX: Check filter ---
-      // (Note: You might need to update server to send object {roomId} for hide_typing too,
-      // currently it might send null or string. I updated server code above to send object)
+    // 3. Stop Typing Listener
+    _socket.on('hide_typing', (data) {
+      if (!mounted) return; // Safety Check
       if (data is Map && data['roomId'] != widget.roomId) return;
 
-      if (mounted) setState(() => _isTyping = false);
+      setState(() => _isTyping = false);
     });
   }
 
@@ -86,36 +89,35 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     _typingTimer?.cancel();
     _messageController.dispose();
 
-    final socket = ref.read(socketServiceProvider).socket;
-    // Remove specific listeners so they don't stack up
-    socket.off('chat_message');
-    socket.off('display_typing');
-    socket.off('hide_typing');
+    // FIX 4: Use the local '_socket' variable.
+    // DO NOT use 'ref.read' here. It causes the "Bad State" error.
+    _socket.off('chat_message');
+    _socket.off('display_typing');
+    _socket.off('hide_typing');
+
     super.dispose();
   }
 
   void sendMessage() {
     if (_messageController.text.trim().isEmpty) return;
 
-    final socket = ref.read(socketServiceProvider).socket;
-
+    // Use local variable
     Map<String, dynamic> msgData = {
       'content': _messageController.text.trim(),
       'roomId': widget.roomId,
     };
 
-    socket.emit('chat_message', msgData);
+    _socket.emit('chat_message', msgData);
     _messageController.clear();
   }
 
   void _onTextChanged(String text) {
-    final socket = ref.read(socketServiceProvider).socket;
-
-    socket.emit('typing', widget.roomId);
+    // Use local variable
+    _socket.emit('typing', widget.roomId);
 
     if (_typingTimer?.isActive ?? false) _typingTimer!.cancel();
     _typingTimer = Timer(const Duration(milliseconds: 2000), () {
-      socket.emit('stop_typing', widget.roomId);
+      _socket.emit('stop_typing', widget.roomId);
     });
   }
 
