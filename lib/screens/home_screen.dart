@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:socket_io_client/socket_io_client.dart' as IO;
 import '../providers/auth_provider.dart';
 import '../providers/socket_provider.dart';
-import '../services/auth_service.dart'; // Import this to use search
+import '../services/auth_service.dart';
 import 'chat_screen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
@@ -15,24 +16,69 @@ class HomeScreen extends ConsumerStatefulWidget {
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   List<dynamic> _conversations = [];
   bool _isLoading = true;
+  late IO.Socket _socket; // Local variable for safe disposal
 
   @override
   void initState() {
     super.initState();
+    // 1. Initial Data Fetch
     _loadConversations();
+
+    // 2. Setup Real-time Listeners
+    _socket = ref.read(socketServiceProvider).socket;
+    Future.microtask(() => _setupSocketListeners());
   }
 
-  // Fetch the "Inbox"
-  Future<void> _loadConversations() async {
-    // FIX: Ensure widget is alive before using 'ref'
+  void _setupSocketListeners() {
     if (!mounted) return;
 
+    // A. Listen for Incoming Messages (To update preview text)
+    _socket.on('chat_message', (data) {
+      if (!mounted) return;
+
+      final roomId = data['roomId'];
+      final content = data['content'];
+
+      setState(() {
+        // 1. Find if we already have this conversation
+        final index = _conversations.indexWhere((c) => c['id'] == roomId);
+
+        if (index != -1) {
+          // UPDATE EXISTING: Move to top & update text
+          final chat = _conversations.removeAt(index);
+          chat['lastMessage'] = content;
+          chat['updatedAt'] = DateTime.now().toString(); // Update time
+          _conversations.insert(0, chat); // Push to top
+        } else {
+          // NEW CONVERSATION: We don't have details (name, avatar) yet.
+          // Simplest fix: Just reload the whole list from API.
+          _loadConversations();
+        }
+      });
+    });
+
+    // B. Listen for Online Status Changes
+    _socket.on('user_status_change', (data) {
+      if (!mounted) return;
+
+      setState(() {
+        // Find any conversation with this user and update their status
+        for (var chat in _conversations) {
+          if (chat['otherUser']['_id'] == data['userId']) {
+            chat['otherUser']['is_online'] = data['isOnline'];
+          }
+        }
+      });
+    });
+  }
+
+  Future<void> _loadConversations() async {
+    if (!mounted) return;
     final user = ref.read(authProvider).user;
     if (user == null) return;
 
     final chats = await ref.read(authServiceProvider).getConversations(user.id);
 
-    // FIX: Check mounted again before calling setState
     if (mounted) {
       setState(() {
         _conversations = chats;
@@ -41,7 +87,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
   }
 
-  // Show a popup to search for a new user
+  // ... (Keep _showSearchDialog exactly as it was) ...
   void _showSearchDialog() {
     final searchController = TextEditingController();
     showDialog(
@@ -62,14 +108,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               final username = searchController.text.trim();
               if (username.isEmpty) return;
 
-              // 1. Search API
               final result = await ref
                   .read(authServiceProvider)
                   .searchUser(username);
-              Navigator.pop(context); // Close dialog
+              Navigator.pop(context);
 
               if (result != null) {
-                // 2. Found! Open Chat
                 _joinChat(result);
               } else {
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -85,7 +129,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   void _joinChat(dynamic targetUser) {
-    // Check if we are trying to chat with ourselves
     final myUser = ref.read(authProvider).user;
     if (targetUser['_id'] == myUser?.id) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -96,10 +139,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
     final socket = ref.read(socketServiceProvider).socket;
 
-    // 1. Request Private Chat
     socket.emit('join_private_chat', targetUser['_id']);
 
-    // 2. Wait for Room Ready
     socket.once('private_chat_ready', (data) {
       final roomId = data['roomId'];
       final history = List<Map<String, dynamic>>.from(data['history']);
@@ -113,18 +154,29 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             initialHistory: history,
           ),
         ),
-      ).then((_) => _loadConversations()); // Refresh list when coming back
+      ).then((_) {
+        // Refresh when coming back (just in case)
+        _loadConversations();
+      });
     });
   }
 
   @override
+  void dispose() {
+    // CLEANUP: Stop listening to updates when this screen dies
+    // (Note: In a TabView, you might NOT want to turn these off,
+    // but for now this prevents errors)
+    _socket.off('chat_message');
+    _socket.off('user_status_change');
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    // We get the user, and now we will USE it below
     final currentUser = ref.watch(authProvider).user;
 
     return Scaffold(
       appBar: AppBar(
-        // FIX: Display the username dynamically
         title: Text(
           currentUser != null ? "Chats (${currentUser.username})" : "Chats",
         ),
@@ -152,11 +204,31 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               itemBuilder: (context, index) {
                 final chat = _conversations[index];
                 final otherUser = chat['otherUser'];
+                final isOnline = otherUser['is_online'] ?? false;
 
                 return ListTile(
-                  leading: CircleAvatar(
-                    backgroundColor: Colors.grey.shade300,
-                    child: const Icon(Icons.person, color: Colors.white),
+                  leading: Stack(
+                    children: [
+                      CircleAvatar(
+                        backgroundColor: Colors.grey.shade300,
+                        child: const Icon(Icons.person, color: Colors.white),
+                      ),
+                      // ONLINE INDICATOR
+                      if (isOnline)
+                        Positioned(
+                          right: 0,
+                          bottom: 0,
+                          child: Container(
+                            width: 12,
+                            height: 12,
+                            decoration: BoxDecoration(
+                              color: Colors.green,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white, width: 2),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                   title: Text(
                     otherUser['username'] ?? 'Unknown',
@@ -166,6 +238,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     chat['lastMessage'] ?? 'Start a conversation',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      // Highlight unread messages logic could go here later
+                      color: Colors.grey[600],
+                    ),
                   ),
                   onTap: () => _joinChat(otherUser),
                 );
