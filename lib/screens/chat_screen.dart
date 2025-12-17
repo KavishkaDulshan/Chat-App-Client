@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io'; // Required for File
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -6,6 +7,7 @@ import 'package:socket_io_client/socket_io_client.dart' as IO;
 import '../providers/socket_provider.dart';
 import '../providers/auth_provider.dart';
 import '../widgets/message_bubble.dart';
+import '../services/image_service.dart'; // Import your new service
 
 class ChatScreen extends ConsumerStatefulWidget {
   final String otherUserName;
@@ -25,12 +27,13 @@ class ChatScreen extends ConsumerStatefulWidget {
 
 class _ChatScreenState extends ConsumerState<ChatScreen> {
   final TextEditingController _messageController = TextEditingController();
-
-  // FIX 1: Add a ScrollController
   final ScrollController _scrollController = ScrollController();
+  final ImageService _imageService = ImageService(); // Image Service Instance
 
   final List<Map<String, dynamic>> _messages = [];
+
   bool _isTyping = false;
+  bool _isUploading = false; // Loading state for image upload
   String _typingUser = '';
   Timer? _typingTimer;
   late IO.Socket _socket;
@@ -40,9 +43,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     super.initState();
     _messages.addAll(widget.initialHistory);
 
+    // Capture socket instance locally
     _socket = ref.read(socketServiceProvider).socket;
 
-    // FIX 2: Scroll to bottom immediately after the screen loads
+    // Auto-scroll to bottom on load
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _scrollToBottom();
     });
@@ -50,7 +54,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     Future.microtask(() => _setupSocketListeners());
   }
 
-  // FIX 3: Helper function to scroll down
   void _scrollToBottom() {
     if (_scrollController.hasClients) {
       _scrollController.animateTo(
@@ -64,7 +67,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   void _setupSocketListeners() {
     if (!mounted) return;
 
-    // Safety join
     _socket.emit('join_room', widget.roomId);
 
     // 1. Message Listener
@@ -76,8 +78,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         _messages.add(data);
       });
 
-      // FIX 4: Scroll down when receiving a message
-      // We wait for the frame to render the new bubble, then scroll
+      // Scroll to bottom when new message arrives
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
     });
 
@@ -92,7 +93,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         _typingUser = data['username'];
       });
 
-      // FIX 5: Scroll down if typing indicator pushes content up
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
     });
 
@@ -105,17 +105,40 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     });
   }
 
-  @override
-  void dispose() {
-    _typingTimer?.cancel();
-    _messageController.dispose();
-    _scrollController.dispose(); // FIX 6: Clean up controller
+  // --- IMAGE SENDING LOGIC ---
+  void _handleImageSend() async {
+    // 1. Pick Image
+    final File? file = await _imageService.pickImage();
+    if (file == null) return;
 
-    _socket.off('chat_message');
-    _socket.off('display_typing');
-    _socket.off('hide_typing');
+    setState(() => _isUploading = true);
 
-    super.dispose();
+    // 2. Upload to Cloudinary
+    final String? imageUrl = await _imageService.uploadImage(file);
+
+    setState(() => _isUploading = false);
+
+    // 3. Send Message OR Show Error
+    if (imageUrl != null) {
+      Map<String, dynamic> msgData = {
+        'content': imageUrl,
+        'roomId': widget.roomId,
+        'type': 'image',
+      };
+
+      _socket.emit('chat_message', msgData);
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+    } else {
+      // FIX: Show error if upload failed
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Image upload failed. Check server logs."),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   void sendMessage() {
@@ -124,12 +147,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     Map<String, dynamic> msgData = {
       'content': _messageController.text.trim(),
       'roomId': widget.roomId,
+      'type': 'text', // Explicitly set type
     };
 
     _socket.emit('chat_message', msgData);
     _messageController.clear();
 
-    // FIX 7: Scroll down immediately when we send
     WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
   }
 
@@ -140,6 +163,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     _typingTimer = Timer(const Duration(milliseconds: 2000), () {
       _socket.emit('stop_typing', widget.roomId);
     });
+  }
+
+  @override
+  void dispose() {
+    _typingTimer?.cancel();
+    _messageController.dispose();
+    _scrollController.dispose();
+
+    // Clean up listeners using local variable
+    _socket.off('chat_message');
+    _socket.off('display_typing');
+    _socket.off('hide_typing');
+
+    super.dispose();
   }
 
   String _formatTime(String? isoString) {
@@ -189,7 +226,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         children: [
           Expanded(
             child: ListView.builder(
-              // FIX 8: Attach the controller
               controller: _scrollController,
               padding: const EdgeInsets.only(top: 10, bottom: 10),
               itemCount: _messages.length,
@@ -202,6 +238,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   text: msg['content'] ?? '',
                   time: _formatTime(msg['timestamp']),
                   isMe: isMe,
+                  type: msg['type'] ?? 'text', // Pass the type to the bubble
                 );
               },
             ),
@@ -214,6 +251,18 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             color: const Color(0xFFF5F5F5),
             child: Row(
               children: [
+                // IMAGE UPLOAD BUTTON
+                IconButton(
+                  icon: _isUploading
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.photo, color: Colors.blueGrey),
+                  onPressed: _isUploading ? null : _handleImageSend,
+                ),
+
                 Expanded(
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 15),
