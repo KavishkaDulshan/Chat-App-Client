@@ -2,7 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
-import 'package:socket_io_client/socket_io_client.dart' as IO; // Import types
+import 'package:socket_io_client/socket_io_client.dart' as IO;
 import '../providers/socket_provider.dart';
 import '../providers/auth_provider.dart';
 import '../widgets/message_bubble.dart';
@@ -25,12 +25,14 @@ class ChatScreen extends ConsumerStatefulWidget {
 
 class _ChatScreenState extends ConsumerState<ChatScreen> {
   final TextEditingController _messageController = TextEditingController();
+
+  // FIX 1: Add a ScrollController
+  final ScrollController _scrollController = ScrollController();
+
   final List<Map<String, dynamic>> _messages = [];
   bool _isTyping = false;
   String _typingUser = '';
   Timer? _typingTimer;
-
-  // FIX 1: Store socket locally to avoid using 'ref' in dispose
   late IO.Socket _socket;
 
   @override
@@ -38,46 +40,65 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     super.initState();
     _messages.addAll(widget.initialHistory);
 
-    // FIX 2: Initialize the local socket variable immediately
     _socket = ref.read(socketServiceProvider).socket;
 
-    // Defer the setup logic, but use the local _socket variable
+    // FIX 2: Scroll to bottom immediately after the screen loads
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollToBottom();
+    });
+
     Future.microtask(() => _setupSocketListeners());
   }
 
-  void _setupSocketListeners() {
-    // Safety check: If screen closed before this runs, stop.
-    if (!mounted) return;
+  // FIX 3: Helper function to scroll down
+  void _scrollToBottom() {
+    if (_scrollController.hasClients) {
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    }
+  }
 
-    final myUsername = ref.read(authProvider).user?.username;
+  void _setupSocketListeners() {
+    if (!mounted) return;
 
     // Safety join
     _socket.emit('join_room', widget.roomId);
 
     // 1. Message Listener
     _socket.on('chat_message', (data) {
-      // FIX 3: Check mounted before SetState
       if (!mounted) return;
       if (data['roomId'] != widget.roomId) return;
 
-      setState(() => _messages.add(data));
+      setState(() {
+        _messages.add(data);
+      });
+
+      // FIX 4: Scroll down when receiving a message
+      // We wait for the frame to render the new bubble, then scroll
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
     });
 
     // 2. Typing Listener
     _socket.on('display_typing', (data) {
-      if (!mounted) return; // Safety Check
-      if (data['username'] == myUsername) return;
+      if (!mounted) return;
+      if (data['username'] == ref.read(authProvider).user?.username) return;
       if (data['roomId'] != widget.roomId) return;
 
       setState(() {
         _isTyping = true;
         _typingUser = data['username'];
       });
+
+      // FIX 5: Scroll down if typing indicator pushes content up
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
     });
 
     // 3. Stop Typing Listener
     _socket.on('hide_typing', (data) {
-      if (!mounted) return; // Safety Check
+      if (!mounted) return;
       if (data is Map && data['roomId'] != widget.roomId) return;
 
       setState(() => _isTyping = false);
@@ -88,9 +109,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   void dispose() {
     _typingTimer?.cancel();
     _messageController.dispose();
+    _scrollController.dispose(); // FIX 6: Clean up controller
 
-    // FIX 4: Use the local '_socket' variable.
-    // DO NOT use 'ref.read' here. It causes the "Bad State" error.
     _socket.off('chat_message');
     _socket.off('display_typing');
     _socket.off('hide_typing');
@@ -101,7 +121,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   void sendMessage() {
     if (_messageController.text.trim().isEmpty) return;
 
-    // Use local variable
     Map<String, dynamic> msgData = {
       'content': _messageController.text.trim(),
       'roomId': widget.roomId,
@@ -109,10 +128,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
     _socket.emit('chat_message', msgData);
     _messageController.clear();
+
+    // FIX 7: Scroll down immediately when we send
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
   }
 
   void _onTextChanged(String text) {
-    // Use local variable
     _socket.emit('typing', widget.roomId);
 
     if (_typingTimer?.isActive ?? false) _typingTimer!.cancel();
@@ -168,6 +189,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         children: [
           Expanded(
             child: ListView.builder(
+              // FIX 8: Attach the controller
+              controller: _scrollController,
               padding: const EdgeInsets.only(top: 10, bottom: 10),
               itemCount: _messages.length,
               itemBuilder: (context, index) {
