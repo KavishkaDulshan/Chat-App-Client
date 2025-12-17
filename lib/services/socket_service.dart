@@ -6,26 +6,39 @@ class SocketService {
 
   IO.Socket get socket => _socket;
 
-  // Initialize and Connect
+  // Initialize and Connect Securely
   void connect(User user, Function onConnectionSuccess) {
+    // 1. Dispose if already connected to avoid duplicates
+    try {
+      _socket.dispose();
+    } catch (e) {
+      // ignore
+    }
+
+    // 2. Connect with JWT TOKEN
     // NOTE: Use 'http://10.0.2.2:3000' for Android Emulator
-    _socket = IO.io('http://localhost:3000', <String, dynamic>{
-      'transports': ['websocket'],
-      'autoConnect': false,
-    });
+    _socket = IO.io(
+      'http://localhost:3000',
+      IO.OptionBuilder()
+          .setTransports(['websocket'])
+          .setAuth({'token': user.token}) // <--- SEND TOKEN HERE
+          .enableForceNew()
+          .build(),
+    );
 
     _socket.connect();
 
+    // 3. Listen for Success
     _socket.onConnect((_) {
-      print('✅ Socket Connected');
-      // Handshake: Identify ourselves to the server
-      _socket.emit('login', user.username);
+      print('✅ Secure Socket Connected');
+
+      // We don't need to emit 'login' anymore!
+      // The handshake verified us. We are ready immediately.
+      onConnectionSuccess();
     });
 
-    // Wait for server to confirm we are logged in
-    _socket.on('login_success', (_) {
-      print('✅ Handshake Complete');
-      onConnectionSuccess();
+    _socket.onConnectError((data) {
+      print('❌ Socket Connection Error: $data');
     });
 
     _socket.onDisconnect((_) => print('❌ Socket Disconnected'));
