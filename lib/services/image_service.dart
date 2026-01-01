@@ -1,15 +1,11 @@
 import 'dart:io'; // <--- Import Platform
 import 'package:dio/dio.dart';
 import 'package:image_picker/image_picker.dart';
+import '../config.dart';
 
 class ImageService {
   // DYNAMIC URL
-  String get uploadUrl {
-    if (Platform.isAndroid) {
-      return 'http://10.0.2.2:3000/upload';
-    }
-    return 'http://localhost:3000/upload';
-  }
+  String get uploadUrl => '${AppConfig.baseUrl}/upload';
 
   final Dio _dio = Dio();
   final ImagePicker _picker = ImagePicker();

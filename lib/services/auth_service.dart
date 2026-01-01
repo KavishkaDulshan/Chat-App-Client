@@ -4,18 +4,14 @@ import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/user_model.dart';
+import '../config.dart';
 
 final authServiceProvider = Provider((ref) => AuthService());
 
 class AuthService {
   // DYNAMIC URL LOGIC
   // Returns localhost for Windows, 10.0.2.2 for Android Emulator
-  String get baseUrl {
-    if (Platform.isAndroid) {
-      return 'http://10.0.2.2:3000';
-    }
-    return 'http://localhost:3000';
-  }
+  String get baseUrl => AppConfig.baseUrl;
 
   final storage = const FlutterSecureStorage();
 

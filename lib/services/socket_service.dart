@@ -1,6 +1,7 @@
 import 'dart:io'; // <--- Import Platform
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import '../models/user_model.dart';
+import '../config.dart';
 
 class SocketService {
   late IO.Socket _socket;
@@ -9,9 +10,7 @@ class SocketService {
 
   void connect(User user, Function onConnectionSuccess) {
     // DYNAMIC URL
-    String socketUrl = Platform.isAndroid
-        ? 'http://10.0.2.2:3000'
-        : 'http://localhost:3000';
+    String socketUrl = AppConfig.baseUrl;
 
     _socket = IO.io(
       socketUrl,
