@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
+import '../app_theme.dart';
 
 class MessageBubble extends StatelessWidget {
   final String sender;
-  final String text; // This holds the Message Content (Text OR Image URL)
+  final String text;
   final String time;
   final bool isMe;
-  final String type; // NEW: 'text' or 'image'
+  final String type;
 
   const MessageBubble({
     super.key,
@@ -13,117 +14,105 @@ class MessageBubble extends StatelessWidget {
     required this.text,
     required this.time,
     required this.isMe,
-    this.type = 'text', // Default to text if missing
+    this.type = 'text',
   });
 
   @override
   Widget build(BuildContext context) {
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-      child: ConstrainedBox(
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
         constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.75,
+          maxWidth: MediaQuery.of(context).size.width * 0.70,
         ),
-        child: Container(
-          margin: const EdgeInsets.symmetric(vertical: 5, horizontal: 10),
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: isMe ? const Color(0xFF007AFF) : const Color(0xFFE5E5EA),
-            borderRadius: BorderRadius.only(
-              topLeft: const Radius.circular(16),
-              topRight: const Radius.circular(16),
-              bottomLeft: isMe
-                  ? const Radius.circular(16)
-                  : const Radius.circular(0),
-              bottomRight: isMe
-                  ? const Radius.circular(0)
-                  : const Radius.circular(16),
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min, // Hug content
-            children: [
-              // 1. SENDER NAME (Only show for others)
-              if (!isMe)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 4.0),
-                  child: Text(
-                    sender,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.grey[700],
-                    ),
+        child: Column(
+          crossAxisAlignment: isMe
+              ? CrossAxisAlignment.end
+              : CrossAxisAlignment.start,
+          children: [
+            if (!isMe) ...[
+              Padding(
+                padding: const EdgeInsets.only(left: 12, bottom: 4),
+                child: Text(
+                  sender,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.grey[600],
                   ),
                 ),
+              ),
+            ],
 
-              // 2. CONTENT (Image OR Text)
-              type == 'image'
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: isMe
+                    ? AppTheme.myMessageColor
+                    : AppTheme.otherMessageColor,
+                // Gradient for 'Me' bubble (optional, modern touch)
+                gradient: isMe
+                    ? const LinearGradient(
+                        colors: [Color(0xFF6B4EFF), Color(0xFF8B75FF)],
+                      )
+                    : null,
+                borderRadius: BorderRadius.only(
+                  topLeft: const Radius.circular(20),
+                  topRight: const Radius.circular(20),
+                  bottomLeft: isMe
+                      ? const Radius.circular(20)
+                      : const Radius.circular(4),
+                  bottomRight: isMe
+                      ? const Radius.circular(4)
+                      : const Radius.circular(20),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.05),
+                    blurRadius: 5,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: type == 'image'
                   ? ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(12),
                       child: Image.network(
-                        text, // In this case, 'text' variable is the URL
+                        text,
                         fit: BoxFit.cover,
-                        // Loading Spinner
-                        loadingBuilder: (context, child, loadingProgress) {
-                          if (loadingProgress == null) return child;
-                          return Container(
-                            height: 150,
-                            width: 200,
-                            color: Colors.black12,
-                            child: Center(
-                              child: CircularProgressIndicator(
-                                value:
-                                    loadingProgress.expectedTotalBytes != null
-                                    ? loadingProgress.cumulativeBytesLoaded /
-                                          loadingProgress.expectedTotalBytes!
-                                    : null,
-                                color: isMe ? Colors.white : Colors.blue,
+                        loadingBuilder: (_, child, progress) => progress == null
+                            ? child
+                            : Container(
+                                height: 150,
+                                width: 200,
+                                color: Colors.black12,
+                                child: const Center(
+                                  child: CircularProgressIndicator(),
+                                ),
                               ),
-                            ),
-                          );
-                        },
-                        // Error Icon
-                        errorBuilder: (context, error, stackTrace) => Container(
-                          height: 150,
-                          width: 200,
-                          color: Colors.grey[300],
-                          child: const Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.broken_image, color: Colors.red),
-                              Text(
-                                "Failed to load",
-                                style: TextStyle(fontSize: 10),
-                              ),
-                            ],
-                          ),
-                        ),
+                        errorBuilder: (_, __, ___) =>
+                            const Icon(Icons.broken_image, color: Colors.white),
                       ),
                     )
                   : Text(
                       text,
                       style: TextStyle(
-                        color: isMe ? Colors.white : Colors.black87,
-                        fontSize: 16,
+                        color: isMe ? Colors.white : AppTheme.textPrimary,
+                        fontSize: 15,
+                        height: 1.3,
                       ),
                     ),
+            ),
 
-              // 3. TIMESTAMP
-              const SizedBox(height: 5),
-              Align(
-                alignment: Alignment.bottomRight,
-                child: Text(
-                  time,
-                  style: TextStyle(
-                    color: isMe ? Colors.white70 : Colors.black54,
-                    fontSize: 10,
-                  ),
-                ),
+            Padding(
+              padding: const EdgeInsets.only(top: 4, right: 4, left: 4),
+              child: Text(
+                time,
+                style: TextStyle(fontSize: 10, color: Colors.grey[500]),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

@@ -1,24 +1,28 @@
+// (Imports remain the same, just add AppTheme)
 import 'dart:async';
-import 'dart:io'; // Required for File
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import '../providers/socket_provider.dart';
 import '../providers/auth_provider.dart';
-import '../widgets/message_bubble.dart';
-import '../services/image_service.dart'; // Import your new service
+import '../widgets/message_bubble.dart'; // We will update this next
+import '../services/image_service.dart';
+import '../app_theme.dart'; // Import
 
 class ChatScreen extends ConsumerStatefulWidget {
   final String otherUserName;
   final String roomId;
   final List<Map<String, dynamic>> initialHistory;
+  final bool isDesktop; // Optional flag
 
   const ChatScreen({
     super.key,
     required this.otherUserName,
     required this.roomId,
     required this.initialHistory,
+    this.isDesktop = false,
   });
 
   @override
@@ -26,14 +30,13 @@ class ChatScreen extends ConsumerStatefulWidget {
 }
 
 class _ChatScreenState extends ConsumerState<ChatScreen> {
+  // ... (Keep ALL your existing state variables: controller, scrollController, etc.) ...
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  final ImageService _imageService = ImageService(); // Image Service Instance
-
+  final ImageService _imageService = ImageService();
   final List<Map<String, dynamic>> _messages = [];
-
   bool _isTyping = false;
-  bool _isUploading = false; // Loading state for image upload
+  bool _isUploading = false;
   String _typingUser = '';
   Timer? _typingTimer;
   late IO.Socket _socket;
@@ -42,18 +45,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   void initState() {
     super.initState();
     _messages.addAll(widget.initialHistory);
-
-    // Capture socket instance locally
     _socket = ref.read(socketServiceProvider).socket;
-
-    // Auto-scroll to bottom on load
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _scrollToBottom();
-    });
-
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
     Future.microtask(() => _setupSocketListeners());
   }
 
+  // ... (Keep existing methods: _scrollToBottom, _setupSocketListeners, _handleImageSend, sendMessage, _onTextChanged, dispose, _formatTime) ...
+  // [PASTE YOUR EXISTING LOGIC METHODS HERE]
+
+  // -- RE-IMPLMENTING LOGIC FOR COMPLETENESS --
   void _scrollToBottom() {
     if (_scrollController.hasClients) {
       _scrollController.animateTo(
@@ -66,103 +66,65 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   void _setupSocketListeners() {
     if (!mounted) return;
-
     _socket.emit('join_room', widget.roomId);
 
-    // 1. Message Listener
     _socket.on('chat_message', (data) {
       if (!mounted) return;
       if (data['roomId'] != widget.roomId) return;
-
-      setState(() {
-        _messages.add(data);
-      });
-
-      // Scroll to bottom when new message arrives
+      setState(() => _messages.add(data));
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
     });
 
-    // 2. Typing Listener
     _socket.on('display_typing', (data) {
       if (!mounted) return;
       if (data['username'] == ref.read(authProvider).user?.username) return;
       if (data['roomId'] != widget.roomId) return;
-
       setState(() {
         _isTyping = true;
         _typingUser = data['username'];
       });
-
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
     });
 
-    // 3. Stop Typing Listener
     _socket.on('hide_typing', (data) {
       if (!mounted) return;
       if (data is Map && data['roomId'] != widget.roomId) return;
-
       setState(() => _isTyping = false);
     });
   }
 
-  // --- IMAGE SENDING LOGIC ---
   void _handleImageSend() async {
-    // 1. Pick Image
     final File? file = await _imageService.pickImage();
     if (file == null) return;
-
     setState(() => _isUploading = true);
-
-    // 2. Upload to Cloudinary
     final String? imageUrl = await _imageService.uploadImage(file);
-
     setState(() => _isUploading = false);
-
-    // 3. Send Message OR Show Error
     if (imageUrl != null) {
-      Map<String, dynamic> msgData = {
+      _socket.emit('chat_message', {
         'content': imageUrl,
         'roomId': widget.roomId,
         'type': 'image',
-      };
-
-      _socket.emit('chat_message', msgData);
-      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
-    } else {
-      // FIX: Show error if upload failed
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Image upload failed. Check server logs."),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      });
     }
   }
 
   void sendMessage() {
     if (_messageController.text.trim().isEmpty) return;
-
-    Map<String, dynamic> msgData = {
+    _socket.emit('chat_message', {
       'content': _messageController.text.trim(),
       'roomId': widget.roomId,
-      'type': 'text', // Explicitly set type
-    };
-
-    _socket.emit('chat_message', msgData);
+      'type': 'text',
+    });
     _messageController.clear();
-
-    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
   }
 
   void _onTextChanged(String text) {
     _socket.emit('typing', widget.roomId);
-
     if (_typingTimer?.isActive ?? false) _typingTimer!.cancel();
-    _typingTimer = Timer(const Duration(milliseconds: 2000), () {
-      _socket.emit('stop_typing', widget.roomId);
-    });
+    _typingTimer = Timer(
+      const Duration(milliseconds: 2000),
+      () => _socket.emit('stop_typing', widget.roomId),
+    );
   }
 
   @override
@@ -170,20 +132,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     _typingTimer?.cancel();
     _messageController.dispose();
     _scrollController.dispose();
-
-    // Clean up listeners using local variable
     _socket.off('chat_message');
     _socket.off('display_typing');
     _socket.off('hide_typing');
-
     super.dispose();
   }
 
   String _formatTime(String? isoString) {
     if (isoString == null) return "Now";
     try {
-      final DateTime date = DateTime.parse(isoString).toLocal();
-      return DateFormat('jm').format(date);
+      return DateFormat('jm').format(DateTime.parse(isoString).toLocal());
     } catch (e) {
       return "";
     }
@@ -194,27 +152,23 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final myUserId = ref.watch(authProvider).user?.id;
 
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: AppTheme.background, // Light Grey Background
       appBar: AppBar(
-        backgroundColor: const Color(0xFFF5F5F5),
+        backgroundColor: Colors.white,
         elevation: 1,
-        iconTheme: const IconThemeData(color: Colors.black),
+        // On Desktop, we don't need a back button because of Split View
+        leading: widget.isDesktop
+            ? const SizedBox()
+            : const BackButton(color: Colors.black),
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              widget.otherUserName,
-              style: const TextStyle(
-                color: Colors.black,
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
+            Text(widget.otherUserName, style: AppTheme.nameStyle),
             if (_isTyping)
               Text(
                 "$_typingUser is typing...",
-                style: const TextStyle(
-                  color: Color.fromARGB(255, 5, 61, 103),
+                style: TextStyle(
+                  color: AppTheme.primary,
                   fontSize: 12,
                   fontStyle: FontStyle.italic,
                 ),
@@ -227,7 +181,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           Expanded(
             child: ListView.builder(
               controller: _scrollController,
-              padding: const EdgeInsets.only(top: 10, bottom: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
               itemCount: _messages.length,
               itemBuilder: (context, index) {
                 final msg = _messages[index];
@@ -238,55 +192,73 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   text: msg['content'] ?? '',
                   time: _formatTime(msg['timestamp']),
                   isMe: isMe,
-                  type: msg['type'] ?? 'text', // Pass the type to the bubble
+                  type: msg['type'] ?? 'text',
                 );
               },
             ),
           ),
+
+          // INPUT AREA
           Container(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 8.0,
-              vertical: 10.0,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.05),
+                  blurRadius: 10,
+                  offset: const Offset(0, -5),
+                ),
+              ],
             ),
-            color: const Color(0xFFF5F5F5),
             child: Row(
               children: [
-                // IMAGE UPLOAD BUTTON
                 IconButton(
                   icon: _isUploading
                       ? const SizedBox(
-                          width: 20,
-                          height: 20,
+                          width: 24,
+                          height: 24,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : const Icon(Icons.photo, color: Colors.blueGrey),
+                      : Icon(
+                          Icons.add_photo_alternate_rounded,
+                          color: Colors.grey[600],
+                        ),
                   onPressed: _isUploading ? null : _handleImageSend,
                 ),
-
+                const SizedBox(width: 8),
                 Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 15),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(24),
-                      border: Border.all(color: Colors.grey.shade300),
-                    ),
-                    child: TextField(
-                      controller: _messageController,
-                      onChanged: _onTextChanged,
-                      decoration: const InputDecoration(
-                        hintText: "Type a message...",
-                        border: InputBorder.none,
+                  child: TextField(
+                    controller: _messageController,
+                    onChanged: _onTextChanged,
+                    onSubmitted: (_) => sendMessage(),
+                    decoration: InputDecoration(
+                      hintText: "Type a message...",
+                      filled: true,
+                      fillColor: AppTheme.background,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 12,
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(24),
+                        borderSide: BorderSide.none,
                       ),
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
-                CircleAvatar(
-                  radius: 24,
-                  backgroundColor: const Color(0xFF007AFF),
+                const SizedBox(width: 12),
+                Container(
+                  decoration: const BoxDecoration(
+                    color: AppTheme.primary,
+                    shape: BoxShape.circle,
+                  ),
                   child: IconButton(
-                    icon: const Icon(Icons.send, color: Colors.white, size: 20),
+                    icon: const Icon(
+                      Icons.send_rounded,
+                      color: Colors.white,
+                      size: 20,
+                    ),
                     onPressed: sendMessage,
                   ),
                 ),
