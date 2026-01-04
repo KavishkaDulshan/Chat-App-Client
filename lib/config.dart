@@ -1,8 +1,9 @@
 import 'package:flutter/foundation.dart'; // <--- USE THIS, NOT dart:io
 
 class AppConfig {
-  static const bool isProduction = false;
-  static const String productionUrl = 'http://159.203.xxx.xxx:3000';
+  static const bool isProduction = true;
+  static const String productionUrl =
+      'https://chat-app-backend-zqik.onrender.com';
 
   static String get baseUrl {
     if (isProduction) {
