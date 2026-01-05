@@ -1,4 +1,3 @@
-// (Imports remain the same, just add AppTheme)
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -7,15 +6,15 @@ import 'package:intl/intl.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import '../providers/socket_provider.dart';
 import '../providers/auth_provider.dart';
-import '../widgets/message_bubble.dart'; // We will update this next
+import '../widgets/message_bubble.dart';
 import '../services/image_service.dart';
-import '../app_theme.dart'; // Import
+import '../app_theme.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
   final String otherUserName;
   final String roomId;
   final List<Map<String, dynamic>> initialHistory;
-  final bool isDesktop; // Optional flag
+  final bool isDesktop;
 
   const ChatScreen({
     super.key,
@@ -30,11 +29,13 @@ class ChatScreen extends ConsumerStatefulWidget {
 }
 
 class _ChatScreenState extends ConsumerState<ChatScreen> {
-  // ... (Keep ALL your existing state variables: controller, scrollController, etc.) ...
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final ImageService _imageService = ImageService();
+
+  // We keep using Map to stay compatible with your stable code
   final List<Map<String, dynamic>> _messages = [];
+
   bool _isTyping = false;
   bool _isUploading = false;
   String _typingUser = '';
@@ -44,16 +45,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   @override
   void initState() {
     super.initState();
+    // Load history
     _messages.addAll(widget.initialHistory);
+
     _socket = ref.read(socketServiceProvider).socket;
     WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
     Future.microtask(() => _setupSocketListeners());
   }
 
-  // ... (Keep existing methods: _scrollToBottom, _setupSocketListeners, _handleImageSend, sendMessage, _onTextChanged, dispose, _formatTime) ...
-  // [PASTE YOUR EXISTING LOGIC METHODS HERE]
-
-  // -- RE-IMPLMENTING LOGIC FOR COMPLETENESS --
   void _scrollToBottom() {
     if (_scrollController.hasClients) {
       _scrollController.animateTo(
@@ -68,6 +67,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     if (!mounted) return;
     _socket.emit('join_room', widget.roomId);
 
+    // 1. Listen for New Messages
     _socket.on('chat_message', (data) {
       if (!mounted) return;
       if (data['roomId'] != widget.roomId) return;
@@ -75,6 +75,21 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
     });
 
+    // 2. NEW: Listen for Deleted Messages
+    _socket.on('message:deleted', (messageId) {
+      if (!mounted) return;
+      setState(() {
+        // Find the message by ID and mark it as deleted
+        for (var msg in _messages) {
+          if (msg['_id'] == messageId) {
+            msg['isDeleted'] = true;
+            msg['content'] = 'This message was deleted';
+          }
+        }
+      });
+    });
+
+    // 3. Typing Indicators
     _socket.on('display_typing', (data) {
       if (!mounted) return;
       if (data['username'] == ref.read(authProvider).user?.username) return;
@@ -91,6 +106,34 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       if (data is Map && data['roomId'] != widget.roomId) return;
       setState(() => _isTyping = false);
     });
+  }
+
+  // === NEW: Handle Delete Action ===
+  void _handleDeleteMessage(String messageId) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Delete Message?"),
+        content: const Text("This will remove the message for everyone."),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("Cancel"),
+          ),
+          TextButton(
+            onPressed: () {
+              // Emit Delete Event to Server
+              _socket.emit('message:delete', {
+                'messageId': messageId,
+                'roomId': widget.roomId,
+              });
+              Navigator.pop(ctx);
+            },
+            child: const Text("Delete", style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
   }
 
   void _handleImageSend() async {
@@ -133,6 +176,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     _messageController.dispose();
     _scrollController.dispose();
     _socket.off('chat_message');
+    _socket.off('message:deleted'); // Clean up listener
     _socket.off('display_typing');
     _socket.off('hide_typing');
     super.dispose();
@@ -152,11 +196,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final myUserId = ref.watch(authProvider).user?.id;
 
     return Scaffold(
-      backgroundColor: AppTheme.background, // Light Grey Background
+      backgroundColor: AppTheme.background,
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 1,
-        // On Desktop, we don't need a back button because of Split View
         leading: widget.isDesktop
             ? const SizedBox()
             : const BackButton(color: Colors.black),
@@ -186,13 +229,55 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               itemBuilder: (context, index) {
                 final msg = _messages[index];
                 final isMe = msg['sender_id'] == myUserId;
+                final isDeleted = msg['isDeleted'] == true;
 
-                return MessageBubble(
-                  sender: msg['sender_name'] ?? 'Unknown',
-                  text: msg['content'] ?? '',
-                  time: _formatTime(msg['timestamp']),
-                  isMe: isMe,
-                  type: msg['type'] ?? 'text',
+                // 1. DELETED MESSAGE UI
+                if (isDeleted) {
+                  return Align(
+                    alignment: isMe
+                        ? Alignment.centerRight
+                        : Alignment.centerLeft,
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(vertical: 5),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[200],
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: const [
+                          Icon(Icons.block, size: 14, color: Colors.grey),
+                          SizedBox(width: 5),
+                          Text(
+                            "This message was deleted",
+                            style: TextStyle(
+                              fontStyle: FontStyle.italic,
+                              color: Colors.grey,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }
+
+                // 2. NORMAL MESSAGE (With Long Press)
+                return GestureDetector(
+                  onLongPress: isMe
+                      ? () => _handleDeleteMessage(msg['_id'])
+                      : null,
+                  child: MessageBubble(
+                    sender: msg['sender_name'] ?? 'Unknown',
+                    text: msg['content'] ?? '',
+                    time: _formatTime(msg['timestamp']),
+                    isMe: isMe,
+                    type: msg['type'] ?? 'text',
+                  ),
                 );
               },
             ),
