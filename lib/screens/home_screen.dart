@@ -38,6 +38,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       final roomId = data['roomId'];
       final content = data['content'];
 
+      // 1. Send Delivery Ack (I received it!)
+      _socket.emit('message:delivered', {
+        'messageId': data['_id'],
+        'roomId': roomId,
+      });
+
       setState(() {
         final index = _conversations.indexWhere((c) => c['id'] == roomId);
         if (index != -1) {

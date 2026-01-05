@@ -33,7 +33,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   final ScrollController _scrollController = ScrollController();
   final ImageService _imageService = ImageService();
 
-  // We keep using Map to stay compatible with your stable code
   final List<Map<String, dynamic>> _messages = [];
 
   bool _isTyping = false;
@@ -45,11 +44,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   @override
   void initState() {
     super.initState();
-    // Load history
     _messages.addAll(widget.initialHistory);
-
     _socket = ref.read(socketServiceProvider).socket;
-    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollToBottom();
+      _socket.emit('conversation:read', {'roomId': widget.roomId});
+    });
+
     Future.microtask(() => _setupSocketListeners());
   }
 
@@ -65,21 +67,56 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   void _setupSocketListeners() {
     if (!mounted) return;
+    final myUserId = ref.read(authProvider).user?.id;
+
     _socket.emit('join_room', widget.roomId);
 
-    // 1. Listen for New Messages
     _socket.on('chat_message', (data) {
       if (!mounted) return;
       if (data['roomId'] != widget.roomId) return;
+
       setState(() => _messages.add(data));
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+
+      if (data['sender_id'] != myUserId) {
+        _socket.emit('conversation:read', {'roomId': widget.roomId});
+      }
     });
 
-    // 2. NEW: Listen for Deleted Messages
+    _socket.on('conversation:read_ack', (data) {
+      if (!mounted) return;
+
+      // === BUG FIX: Check WHO read the messages ===
+      final readerId = data['readerId'];
+
+      // Only turn blue if the OTHER person read them
+      if (data['roomId'] == widget.roomId && readerId != myUserId) {
+        setState(() {
+          for (var msg in _messages) {
+            if (msg['sender_id'] == myUserId) {
+              msg['status'] = 'read';
+            }
+          }
+        });
+      }
+    });
+
+    _socket.on('message:status_update', (data) {
+      if (!mounted) return;
+      if (data['roomId'] == widget.roomId) {
+        setState(() {
+          for (var msg in _messages) {
+            if (msg['_id'] == data['messageId']) {
+              msg['status'] = data['status'];
+            }
+          }
+        });
+      }
+    });
+
     _socket.on('message:deleted', (messageId) {
       if (!mounted) return;
       setState(() {
-        // Find the message by ID and mark it as deleted
         for (var msg in _messages) {
           if (msg['_id'] == messageId) {
             msg['isDeleted'] = true;
@@ -89,7 +126,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       });
     });
 
-    // 3. Typing Indicators
     _socket.on('display_typing', (data) {
       if (!mounted) return;
       if (data['username'] == ref.read(authProvider).user?.username) return;
@@ -108,7 +144,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     });
   }
 
-  // === NEW: Handle Delete Action ===
   void _handleDeleteMessage(String messageId) {
     showDialog(
       context: context,
@@ -122,7 +157,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           ),
           TextButton(
             onPressed: () {
-              // Emit Delete Event to Server
               _socket.emit('message:delete', {
                 'messageId': messageId,
                 'roomId': widget.roomId,
@@ -176,7 +210,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     _messageController.dispose();
     _scrollController.dispose();
     _socket.off('chat_message');
-    _socket.off('message:deleted'); // Clean up listener
+    _socket.off('message:deleted');
+    _socket.off('conversation:read_ack');
+    _socket.off('message:status_update');
     _socket.off('display_typing');
     _socket.off('hide_typing');
     super.dispose();
@@ -231,7 +267,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 final isMe = msg['sender_id'] == myUserId;
                 final isDeleted = msg['isDeleted'] == true;
 
-                // 1. DELETED MESSAGE UI
                 if (isDeleted) {
                   return Align(
                     alignment: isMe
@@ -266,7 +301,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   );
                 }
 
-                // 2. NORMAL MESSAGE (With Long Press)
                 return GestureDetector(
                   onLongPress: isMe
                       ? () => _handleDeleteMessage(msg['_id'])
@@ -277,6 +311,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                     time: _formatTime(msg['timestamp']),
                     isMe: isMe,
                     type: msg['type'] ?? 'text',
+                    status: msg['status'] ?? 'sent',
                   ),
                 );
               },

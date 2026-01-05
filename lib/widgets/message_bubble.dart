@@ -7,6 +7,7 @@ class MessageBubble extends StatelessWidget {
   final String time;
   final bool isMe;
   final String type;
+  final String status; // NEW: 'sent', 'delivered', 'read'
 
   const MessageBubble({
     super.key,
@@ -15,6 +16,7 @@ class MessageBubble extends StatelessWidget {
     required this.time,
     required this.isMe,
     this.type = 'text',
+    this.status = 'sent', // Default
   });
 
   @override
@@ -24,14 +26,15 @@ class MessageBubble extends StatelessWidget {
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
         constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.70,
+          maxWidth: MediaQuery.of(context).size.width * 0.75,
         ),
         child: Column(
           crossAxisAlignment: isMe
               ? CrossAxisAlignment.end
               : CrossAxisAlignment.start,
           children: [
-            if (!isMe) ...[
+            // Sender Name (if not me)
+            if (!isMe)
               Padding(
                 padding: const EdgeInsets.only(left: 12, bottom: 4),
                 child: Text(
@@ -43,20 +46,14 @@ class MessageBubble extends StatelessWidget {
                   ),
                 ),
               ),
-            ],
 
+            // Bubble
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
                 color: isMe
                     ? AppTheme.myMessageColor
                     : AppTheme.otherMessageColor,
-                // Gradient for 'Me' bubble (optional, modern touch)
-                gradient: isMe
-                    ? const LinearGradient(
-                        colors: [Color(0xFF6B4EFF), Color(0xFF8B75FF)],
-                      )
-                    : null,
                 borderRadius: BorderRadius.only(
                   topLeft: const Radius.circular(20),
                   topRight: const Radius.circular(20),
@@ -67,32 +64,15 @@ class MessageBubble extends StatelessWidget {
                       ? const Radius.circular(4)
                       : const Radius.circular(20),
                 ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
-                    blurRadius: 5,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
               ),
               child: type == 'image'
                   ? ClipRRect(
                       borderRadius: BorderRadius.circular(12),
                       child: Image.network(
                         text,
+                        height: 150,
+                        width: 200,
                         fit: BoxFit.cover,
-                        loadingBuilder: (_, child, progress) => progress == null
-                            ? child
-                            : Container(
-                                height: 150,
-                                width: 200,
-                                color: Colors.black12,
-                                child: const Center(
-                                  child: CircularProgressIndicator(),
-                                ),
-                              ),
-                        errorBuilder: (_, __, ___) =>
-                            const Icon(Icons.broken_image, color: Colors.white),
                       ),
                     )
                   : Text(
@@ -100,16 +80,35 @@ class MessageBubble extends StatelessWidget {
                       style: TextStyle(
                         color: isMe ? Colors.white : AppTheme.textPrimary,
                         fontSize: 15,
-                        height: 1.3,
                       ),
                     ),
             ),
 
+            // Time & Ticks Row
             Padding(
-              padding: const EdgeInsets.only(top: 4, right: 4, left: 4),
-              child: Text(
-                time,
-                style: TextStyle(fontSize: 10, color: Colors.grey[500]),
+              padding: const EdgeInsets.only(top: 4, right: 4),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    time,
+                    style: TextStyle(fontSize: 10, color: Colors.grey[500]),
+                  ),
+
+                  // TICKS LOGIC (Only for me)
+                  if (isMe) ...[
+                    const SizedBox(width: 4),
+                    Icon(
+                      status == 'sent'
+                          ? Icons.check
+                          : Icons.done_all, // Single or Double
+                      size: 14,
+                      color: status == 'read'
+                          ? Colors.blue
+                          : Colors.grey, // Blue if read
+                    ),
+                  ],
+                ],
               ),
             ),
           ],
