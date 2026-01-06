@@ -8,10 +8,7 @@ import '../config.dart';
 final authServiceProvider = Provider((ref) => AuthService());
 
 class AuthService {
-  // DYNAMIC URL LOGIC
-  // Returns localhost for Windows, 10.0.2.2 for Android Emulator
   String get baseUrl => AppConfig.baseUrl;
-
   final storage = const FlutterSecureStorage();
 
   Future<User?> login(String email, String password) async {
@@ -25,9 +22,13 @@ class AuthService {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final token = data['token'];
-        // Save token securely
+        final userJson = data['user']; // The user object from backend
+
+        // 1. SAVE TOKEN & USER DATA
         await storage.write(key: 'jwt_token', value: token);
-        return User.fromJson(data['user'], token);
+        await storage.write(key: 'user_data', value: jsonEncode(userJson));
+
+        return User.fromJson(userJson, token);
       } else {
         print('Login Failed: ${response.body}');
       }
@@ -37,6 +38,28 @@ class AuthService {
     return null;
   }
 
+  // === NEW: RESTORE SESSION ===
+  Future<User?> tryAutoLogin() async {
+    try {
+      final token = await storage.read(key: 'jwt_token');
+      final userStr = await storage.read(key: 'user_data');
+
+      if (token != null && userStr != null) {
+        final userJson = jsonDecode(userStr);
+        return User.fromJson(userJson, token);
+      }
+    } catch (e) {
+      print("Auto Login Error: $e");
+    }
+    return null;
+  }
+
+  // === NEW: LOGOUT ===
+  Future<void> logout() async {
+    await storage.deleteAll();
+  }
+
+  // ... (Keep register, searchUser, getConversations as they are) ...
   Future<bool> register(String username, String email, String password) async {
     try {
       final response = await http.post(
@@ -72,10 +95,5 @@ class AuthService {
       if (response.statusCode == 200) return jsonDecode(response.body);
     } catch (e) {}
     return [];
-  }
-
-  // --- THIS WAS MISSING ---
-  Future<void> logout() async {
-    await storage.delete(key: 'jwt_token');
   }
 }
