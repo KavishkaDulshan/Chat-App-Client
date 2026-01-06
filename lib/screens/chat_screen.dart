@@ -12,13 +12,15 @@ import '../app_theme.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
   final String otherUserName;
-  final String roomId;
+  final String otherUserId; // NEW: Need this to get history
+  final String roomId; // This might be temporary ID
   final List<Map<String, dynamic>> initialHistory;
   final bool isDesktop;
 
   const ChatScreen({
     super.key,
     required this.otherUserName,
+    required this.otherUserId, // Added
     required this.roomId,
     required this.initialHistory,
     this.isDesktop = false,
@@ -34,6 +36,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   final ImageService _imageService = ImageService();
 
   final List<Map<String, dynamic>> _messages = [];
+  String _activeRoomId = ""; // Stores the Real DB Room ID
 
   bool _isTyping = false;
   bool _isUploading = false;
@@ -44,13 +47,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   @override
   void initState() {
     super.initState();
+    _activeRoomId = widget.roomId; // Start with passed ID
     _messages.addAll(widget.initialHistory);
     _socket = ref.read(socketServiceProvider).socket;
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _scrollToBottom();
-      _socket.emit('conversation:read', {'roomId': widget.roomId});
-    });
 
     Future.microtask(() => _setupSocketListeners());
   }
@@ -69,33 +68,45 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     if (!mounted) return;
     final myUserId = ref.read(authProvider).user?.id;
 
-    _socket.emit('join_room', widget.roomId);
+    // 1. ASK FOR HISTORY & REAL ROOM ID
+    _socket.emit('join_private_chat', widget.otherUserId);
 
+    // 2. RECEIVE HISTORY
+    _socket.on('private_chat_ready', (data) {
+      if (!mounted) return;
+      setState(() {
+        _activeRoomId = data['roomId']; // Update to Real ID
+        _messages.clear();
+        _messages.addAll(List<Map<String, dynamic>>.from(data['history']));
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _scrollToBottom();
+        _socket.emit('conversation:read', {'roomId': _activeRoomId});
+      });
+    });
+
+    // 3. LISTEN FOR MESSAGES
     _socket.on('chat_message', (data) {
       if (!mounted) return;
-      if (data['roomId'] != widget.roomId) return;
+      // Accept if it matches EITHER the temp ID or real ID
+      if (data['roomId'] != _activeRoomId && data['roomId'] != widget.roomId)
+        return;
 
       setState(() => _messages.add(data));
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
 
       if (data['sender_id'] != myUserId) {
-        _socket.emit('conversation:read', {'roomId': widget.roomId});
+        _socket.emit('conversation:read', {'roomId': _activeRoomId});
       }
     });
 
     _socket.on('conversation:read_ack', (data) {
       if (!mounted) return;
-
-      // === BUG FIX: Check WHO read the messages ===
       final readerId = data['readerId'];
-
-      // Only turn blue if the OTHER person read them
-      if (data['roomId'] == widget.roomId && readerId != myUserId) {
+      if (data['roomId'] == _activeRoomId && readerId != myUserId) {
         setState(() {
           for (var msg in _messages) {
-            if (msg['sender_id'] == myUserId) {
-              msg['status'] = 'read';
-            }
+            if (msg['sender_id'] == myUserId) msg['status'] = 'read';
           }
         });
       }
@@ -103,12 +114,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
     _socket.on('message:status_update', (data) {
       if (!mounted) return;
-      if (data['roomId'] == widget.roomId) {
+      if (data['roomId'] == _activeRoomId) {
         setState(() {
           for (var msg in _messages) {
-            if (msg['_id'] == data['messageId']) {
-              msg['status'] = data['status'];
-            }
+            if (msg['_id'] == data['messageId']) msg['status'] = data['status'];
           }
         });
       }
@@ -129,7 +138,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     _socket.on('display_typing', (data) {
       if (!mounted) return;
       if (data['username'] == ref.read(authProvider).user?.username) return;
-      if (data['roomId'] != widget.roomId) return;
+      if (data['roomId'] != _activeRoomId) return;
       setState(() {
         _isTyping = true;
         _typingUser = data['username'];
@@ -139,7 +148,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
     _socket.on('hide_typing', (data) {
       if (!mounted) return;
-      if (data is Map && data['roomId'] != widget.roomId) return;
+      if (data is Map && data['roomId'] != _activeRoomId) return;
       setState(() => _isTyping = false);
     });
   }
@@ -159,7 +168,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             onPressed: () {
               _socket.emit('message:delete', {
                 'messageId': messageId,
-                'roomId': widget.roomId,
+                'roomId': _activeRoomId,
               });
               Navigator.pop(ctx);
             },
@@ -179,7 +188,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     if (imageUrl != null) {
       _socket.emit('chat_message', {
         'content': imageUrl,
-        'roomId': widget.roomId,
+        'roomId': _activeRoomId, // Use Real ID
         'type': 'image',
       });
     }
@@ -189,18 +198,18 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     if (_messageController.text.trim().isEmpty) return;
     _socket.emit('chat_message', {
       'content': _messageController.text.trim(),
-      'roomId': widget.roomId,
+      'roomId': _activeRoomId, // Use Real ID
       'type': 'text',
     });
     _messageController.clear();
   }
 
   void _onTextChanged(String text) {
-    _socket.emit('typing', widget.roomId);
+    _socket.emit('typing', _activeRoomId);
     if (_typingTimer?.isActive ?? false) _typingTimer!.cancel();
     _typingTimer = Timer(
       const Duration(milliseconds: 2000),
-      () => _socket.emit('stop_typing', widget.roomId),
+      () => _socket.emit('stop_typing', _activeRoomId),
     );
   }
 
@@ -209,12 +218,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     _typingTimer?.cancel();
     _messageController.dispose();
     _scrollController.dispose();
+    // Do not dispose socket here as it's shared
     _socket.off('chat_message');
     _socket.off('message:deleted');
     _socket.off('conversation:read_ack');
     _socket.off('message:status_update');
     _socket.off('display_typing');
     _socket.off('hide_typing');
+    _socket.off('private_chat_ready'); // Remove this listener too
     super.dispose();
   }
 
@@ -317,8 +328,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               },
             ),
           ),
-
-          // INPUT AREA
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
