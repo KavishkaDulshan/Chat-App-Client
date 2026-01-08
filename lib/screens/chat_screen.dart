@@ -12,15 +12,15 @@ import '../app_theme.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
   final String otherUserName;
-  final String otherUserId; // NEW: Need this to get history
-  final String roomId; // This might be temporary ID
+  final String otherUserId;
+  final String roomId;
   final List<Map<String, dynamic>> initialHistory;
   final bool isDesktop;
 
   const ChatScreen({
     super.key,
     required this.otherUserName,
-    required this.otherUserId, // Added
+    required this.otherUserId,
     required this.roomId,
     required this.initialHistory,
     this.isDesktop = false,
@@ -36,7 +36,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   final ImageService _imageService = ImageService();
 
   final List<Map<String, dynamic>> _messages = [];
-  String _activeRoomId = ""; // Stores the Real DB Room ID
+  String _activeRoomId = "";
 
   bool _isTyping = false;
   bool _isUploading = false;
@@ -44,12 +44,54 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   Timer? _typingTimer;
   late IO.Socket _socket;
 
+  // Handler definitions
+  late Function(dynamic) _messageHandler;
+  late Function(dynamic) _typingHandler;
+  late Function(dynamic) _stopTypingHandler;
+
   @override
   void initState() {
     super.initState();
-    _activeRoomId = widget.roomId; // Start with passed ID
+    _activeRoomId = widget.roomId;
     _messages.addAll(widget.initialHistory);
     _socket = ref.read(socketServiceProvider).socket;
+
+    // --- 1. DEFINE HANDLERS ---
+    _messageHandler = (data) {
+      if (!mounted) return;
+      if (data['roomId'] != _activeRoomId && data['roomId'] != widget.roomId) {
+        return;
+      }
+
+      // PREVENT DUPLICATES
+      final isDuplicate = _messages.any((msg) => msg['_id'] == data['_id']);
+      if (isDuplicate) return;
+
+      setState(() => _messages.add(data));
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+
+      final myUserId = ref.read(authProvider).user?.id;
+      if (data['sender_id'] != myUserId) {
+        _socket.emit('conversation:read', {'roomId': _activeRoomId});
+      }
+    };
+
+    _typingHandler = (data) {
+      if (!mounted) return;
+      if (data['username'] == ref.read(authProvider).user?.username) return;
+      if (data['roomId'] != _activeRoomId) return;
+      setState(() {
+        _isTyping = true;
+        _typingUser = data['username'];
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+    };
+
+    _stopTypingHandler = (data) {
+      if (!mounted) return;
+      if (data is Map && data['roomId'] != _activeRoomId) return;
+      setState(() => _isTyping = false);
+    };
 
     Future.microtask(() => _setupSocketListeners());
   }
@@ -66,16 +108,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   void _setupSocketListeners() {
     if (!mounted) return;
-    final myUserId = ref.read(authProvider).user?.id;
 
-    // 1. ASK FOR HISTORY & REAL ROOM ID
+    // 1. Join the Room (for history loading logic on backend)
     _socket.emit('join_private_chat', widget.otherUserId);
 
-    // 2. RECEIVE HISTORY
+    // 2. Attach Named Listeners
+    _socket.on('chat_message', _messageHandler); // <--- ONLY THIS ONE
+    _socket.on('display_typing', _typingHandler);
+    _socket.on('hide_typing', _stopTypingHandler);
+
+    // 3. One-time listener for History
     _socket.on('private_chat_ready', (data) {
       if (!mounted) return;
       setState(() {
-        _activeRoomId = data['roomId']; // Update to Real ID
+        _activeRoomId = data['roomId'];
         _messages.clear();
         _messages.addAll(List<Map<String, dynamic>>.from(data['history']));
       });
@@ -85,24 +131,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       });
     });
 
-    // 3. LISTEN FOR MESSAGES
-    _socket.on('chat_message', (data) {
-      if (!mounted) return;
-      // Accept if it matches EITHER the temp ID or real ID
-      if (data['roomId'] != _activeRoomId && data['roomId'] != widget.roomId)
-        return;
-
-      setState(() => _messages.add(data));
-      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
-
-      if (data['sender_id'] != myUserId) {
-        _socket.emit('conversation:read', {'roomId': _activeRoomId});
-      }
-    });
-
+    // 4. Other Status Updates
     _socket.on('conversation:read_ack', (data) {
       if (!mounted) return;
       final readerId = data['readerId'];
+      final myUserId = ref.read(authProvider).user?.id;
+
       if (data['roomId'] == _activeRoomId && readerId != myUserId) {
         setState(() {
           for (var msg in _messages) {
@@ -133,23 +167,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           }
         }
       });
-    });
-
-    _socket.on('display_typing', (data) {
-      if (!mounted) return;
-      if (data['username'] == ref.read(authProvider).user?.username) return;
-      if (data['roomId'] != _activeRoomId) return;
-      setState(() {
-        _isTyping = true;
-        _typingUser = data['username'];
-      });
-      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
-    });
-
-    _socket.on('hide_typing', (data) {
-      if (!mounted) return;
-      if (data is Map && data['roomId'] != _activeRoomId) return;
-      setState(() => _isTyping = false);
     });
   }
 
@@ -188,7 +205,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     if (imageUrl != null) {
       _socket.emit('chat_message', {
         'content': imageUrl,
-        'roomId': _activeRoomId, // Use Real ID
+        'roomId': _activeRoomId,
         'type': 'image',
       });
     }
@@ -198,7 +215,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     if (_messageController.text.trim().isEmpty) return;
     _socket.emit('chat_message', {
       'content': _messageController.text.trim(),
-      'roomId': _activeRoomId, // Use Real ID
+      'roomId': _activeRoomId,
       'type': 'text',
     });
     _messageController.clear();
@@ -218,14 +235,19 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     _typingTimer?.cancel();
     _messageController.dispose();
     _scrollController.dispose();
-    // Do not dispose socket here as it's shared
-    _socket.off('chat_message');
+
+    // SAFE REMOVAL: Only remove OUR specific listeners
+    _socket.off('chat_message', _messageHandler);
+    _socket.off('display_typing', _typingHandler);
+    _socket.off('hide_typing', _stopTypingHandler);
+
+    // Global generic listeners can be removed if strictly necessary,
+    // but usually better to leave generic ones or use named handlers for them too.
     _socket.off('message:deleted');
     _socket.off('conversation:read_ack');
     _socket.off('message:status_update');
-    _socket.off('display_typing');
-    _socket.off('hide_typing');
-    _socket.off('private_chat_ready'); // Remove this listener too
+    _socket.off('private_chat_ready');
+
     super.dispose();
   }
 

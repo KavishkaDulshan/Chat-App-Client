@@ -19,6 +19,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   bool _isLoading = true;
   late IO.Socket _socket;
 
+  late Function(dynamic) _homeMessageHandler;
+  late Function(dynamic) _statusHandler;
+
   Map<String, dynamic>? _selectedChat;
 
   @override
@@ -26,28 +29,131 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     super.initState();
     _loadConversations();
     _socket = ref.read(socketServiceProvider).socket;
-    Future.microtask(() => _setupSocketListeners());
-  }
 
-  void _setupSocketListeners() {
-    if (!mounted) return;
-    _socket.on('chat_message', (data) {
+    // Initialize Handlers
+    _homeMessageHandler = (data) {
       if (!mounted) return;
+
+      // Acknowledge delivery
       _socket.emit('message:delivered', {
         'messageId': data['_id'],
         'roomId': data['roomId'],
       });
+
       setState(() {
+        final myUserId = ref.read(authProvider).user?.id;
+        final isMe = data['sender_id'] == myUserId;
+
         final index = _conversations.indexWhere(
           (c) => c['id'] == data['roomId'],
         );
+
         if (index != -1) {
+          // EXISTING CHAT: Move to top
           final updatedChat = Map<String, dynamic>.from(_conversations[index]);
           updatedChat['lastMessage'] = data['content'];
+          updatedChat['updatedAt'] = data['timestamp'];
           _conversations.removeAt(index);
           _conversations.insert(0, updatedChat);
         } else {
-          _loadConversations();
+          // NEW CHAT: Create locally
+          if (!isMe) {
+            // ROBUST CONSTRUCTION matching your MongoDB structure
+            final newChat = {
+              'id': data['roomId'],
+              'lastMessage': data['content'],
+              'updatedAt': data['timestamp'],
+              'otherUser': {
+                '_id': data['sender_id'],
+                'id': data['sender_id'], // Add both ID styles to be safe
+                'username': data['sender_name'] ?? 'User',
+                'is_online': true,
+              },
+            };
+            _conversations.insert(0, newChat);
+          } else {
+            // If I sent it (multi-device), safe to reload
+            _loadConversations();
+          }
+        }
+      });
+    };
+
+    _statusHandler = (data) {
+      if (!mounted) return;
+      setState(() {
+        for (var chat in _conversations) {
+          final otherUser = chat['otherUser'];
+          if (otherUser != null &&
+              (otherUser['_id'] == data['userId'] ||
+                  otherUser['id'] == data['userId'])) {
+            otherUser['is_online'] = data['isOnline'];
+          }
+        }
+      });
+    };
+
+    Future.microtask(() => _setupSocketListeners());
+  }
+
+  void _setupSocketListeners() {
+    if (!_socket.hasListeners('chat_message')) {
+      _socket.on('chat_message', _homeMessageHandler);
+    }
+    if (!_socket.hasListeners('user_status_change')) {
+      _socket.on('user_status_change', _statusHandler);
+    }
+    _socket.on('chat_message', (data) {
+      if (!mounted) return;
+
+      // Acknowledge delivery
+      _socket.emit('message:delivered', {
+        'messageId': data['_id'],
+        'roomId': data['roomId'],
+      });
+
+      setState(() {
+        final myUserId = ref.read(authProvider).user?.id;
+        final isMe = data['sender_id'] == myUserId;
+
+        // 1. Find if chat exists in our local list
+        final index = _conversations.indexWhere(
+          (c) => c['id'] == data['roomId'],
+        );
+
+        if (index != -1) {
+          // --- EXISTING CHAT: Move to Top ---
+          final updatedChat = Map<String, dynamic>.from(_conversations[index]);
+          updatedChat['lastMessage'] = data['content'];
+          updatedChat['updatedAt'] = data['timestamp']; // Update time
+
+          _conversations.removeAt(index);
+          _conversations.insert(0, updatedChat);
+        } else {
+          // --- NEW CHAT: Insert Instantly (No API Call) ---
+
+          // If I am the receiver, the "Other User" is the sender.
+          // If I am the sender, I just created this chat, so I might need to load details.
+
+          if (!isMe) {
+            // Construct a temporary chat object from the message data
+            final newChat = {
+              'id': data['roomId'],
+              'lastMessage': data['content'],
+              'updatedAt': data['timestamp'],
+              'otherUser': {
+                '_id': data['sender_id'],
+                'username': data['sender_name'],
+                'is_online': true, // Safe assumption since they just messaged
+              },
+            };
+
+            _conversations.insert(0, newChat);
+          } else {
+            // Edge case: If I sent a message from a different device,
+            // I might not have the recipient's info here. Safe to reload.
+            _loadConversations();
+          }
         }
       });
     });
@@ -71,6 +177,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         }
       });
     });
+    @override
+    void dispose() {
+      // Remove ONLY these specific listeners
+      _socket.off('chat_message', _homeMessageHandler);
+      _socket.off('user_status_change', _statusHandler);
+      super.dispose();
+    }
   }
 
   Future<void> _loadConversations() async {
