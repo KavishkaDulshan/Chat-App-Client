@@ -51,6 +51,26 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         }
       });
     });
+    // 2. NEW FIX: Listen for Online/Offline Status Changes
+    _socket.on('user_status_change', (data) {
+      if (!mounted) return;
+
+      setState(() {
+        // Iterate through all conversations to find the user who changed status
+        for (var chat in _conversations) {
+          final otherUser = chat['otherUser'];
+
+          // Check if this chat belongs to the user who just changed status
+          // We check both '_id' and 'id' to be safe with MongoDB mapping
+          if (otherUser != null &&
+              (otherUser['_id'] == data['userId'] ||
+                  otherUser['id'] == data['userId'])) {
+            // Update the status locally
+            otherUser['is_online'] = data['isOnline'];
+          }
+        }
+      });
+    });
   }
 
   Future<void> _loadConversations() async {
