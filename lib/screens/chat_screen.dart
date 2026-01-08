@@ -1,13 +1,10 @@
-import 'dart:async';
-import 'dart:io';
+// lib/screens/chat_screen.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
-import 'package:socket_io_client/socket_io_client.dart' as IO;
-import '../providers/socket_provider.dart';
 import '../providers/auth_provider.dart';
+import '../providers/chat_provider.dart'; // Import the new provider
 import '../widgets/message_bubble.dart';
-import '../services/image_service.dart';
 import '../app_theme.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
@@ -33,69 +30,20 @@ class ChatScreen extends ConsumerStatefulWidget {
 class _ChatScreenState extends ConsumerState<ChatScreen> {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  final ImageService _imageService = ImageService();
-
-  final List<Map<String, dynamic>> _messages = [];
-  String _activeRoomId = "";
-
-  bool _isTyping = false;
-  bool _isUploading = false;
-  String _typingUser = '';
-  Timer? _typingTimer;
-  late IO.Socket _socket;
-
-  // Handler definitions
-  late Function(dynamic) _messageHandler;
-  late Function(dynamic) _typingHandler;
-  late Function(dynamic) _stopTypingHandler;
 
   @override
   void initState() {
     super.initState();
-    _activeRoomId = widget.roomId;
-    _messages.addAll(widget.initialHistory);
-    _socket = ref.read(socketServiceProvider).socket;
-
-    // --- 1. DEFINE HANDLERS ---
-    _messageHandler = (data) {
-      if (!mounted) return;
-      if (data['roomId'] != _activeRoomId && data['roomId'] != widget.roomId) {
-        return;
-      }
-
-      // PREVENT DUPLICATES
-      final isDuplicate = _messages.any((msg) => msg['_id'] == data['_id']);
-      if (isDuplicate) return;
-
-      setState(() => _messages.add(data));
-      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
-
-      final myUserId = ref.read(authProvider).user?.id;
-      if (data['sender_id'] != myUserId) {
-        _socket.emit('conversation:read', {'roomId': _activeRoomId});
-      }
-    };
-
-    _typingHandler = (data) {
-      if (!mounted) return;
-      if (data['username'] == ref.read(authProvider).user?.username) return;
-      if (data['roomId'] != _activeRoomId) return;
-      setState(() {
-        _isTyping = true;
-        _typingUser = data['username'];
-      });
-      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
-    };
-
-    _stopTypingHandler = (data) {
-      if (!mounted) return;
-      if (data is Map && data['roomId'] != _activeRoomId) return;
-      setState(() => _isTyping = false);
-    };
-
-    Future.microtask(() => _setupSocketListeners());
+    // 1. BOOTSTRAP: Tell the controller to join the chat
+    // We use Future.microtask to avoid "setState during build" errors
+    Future.microtask(() {
+      ref
+          .read(chatProvider.notifier)
+          .joinChat(widget.roomId, widget.otherUserId, widget.initialHistory);
+    });
   }
 
+  // Helper to scroll to bottom
   void _scrollToBottom() {
     if (_scrollController.hasClients) {
       _scrollController.animateTo(
@@ -106,163 +54,32 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     }
   }
 
-  void _setupSocketListeners() {
-    if (!mounted) return;
-
-    // 1. Join the Room (for history loading logic on backend)
-    _socket.emit('join_private_chat', widget.otherUserId);
-
-    // 2. Attach Named Listeners
-    _socket.on('chat_message', _messageHandler); // <--- ONLY THIS ONE
-    _socket.on('display_typing', _typingHandler);
-    _socket.on('hide_typing', _stopTypingHandler);
-
-    // 3. One-time listener for History
-    _socket.on('private_chat_ready', (data) {
-      if (!mounted) return;
-      setState(() {
-        _activeRoomId = data['roomId'];
-        _messages.clear();
-        _messages.addAll(List<Map<String, dynamic>>.from(data['history']));
-      });
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _scrollToBottom();
-        _socket.emit('conversation:read', {'roomId': _activeRoomId});
-      });
-    });
-
-    // 4. Other Status Updates
-    _socket.on('conversation:read_ack', (data) {
-      if (!mounted) return;
-      final readerId = data['readerId'];
-      final myUserId = ref.read(authProvider).user?.id;
-
-      if (data['roomId'] == _activeRoomId && readerId != myUserId) {
-        setState(() {
-          for (var msg in _messages) {
-            if (msg['sender_id'] == myUserId) msg['status'] = 'read';
-          }
-        });
-      }
-    });
-
-    _socket.on('message:status_update', (data) {
-      if (!mounted) return;
-      if (data['roomId'] == _activeRoomId) {
-        setState(() {
-          for (var msg in _messages) {
-            if (msg['_id'] == data['messageId']) msg['status'] = data['status'];
-          }
-        });
-      }
-    });
-
-    _socket.on('message:deleted', (messageId) {
-      if (!mounted) return;
-      setState(() {
-        for (var msg in _messages) {
-          if (msg['_id'] == messageId) {
-            msg['isDeleted'] = true;
-            msg['content'] = 'This message was deleted';
-          }
-        }
-      });
-    });
-  }
-
-  void _handleDeleteMessage(String messageId) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("Delete Message?"),
-        content: const Text("This will remove the message for everyone."),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text("Cancel"),
-          ),
-          TextButton(
-            onPressed: () {
-              _socket.emit('message:delete', {
-                'messageId': messageId,
-                'roomId': _activeRoomId,
-              });
-              Navigator.pop(ctx);
-            },
-            child: const Text("Delete", style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _handleImageSend() async {
-    final File? file = await _imageService.pickImage();
-    if (file == null) return;
-    setState(() => _isUploading = true);
-    final String? imageUrl = await _imageService.uploadImage(file);
-    setState(() => _isUploading = false);
-    if (imageUrl != null) {
-      _socket.emit('chat_message', {
-        'content': imageUrl,
-        'roomId': _activeRoomId,
-        'type': 'image',
-      });
-    }
-  }
-
-  void sendMessage() {
-    if (_messageController.text.trim().isEmpty) return;
-    _socket.emit('chat_message', {
-      'content': _messageController.text.trim(),
-      'roomId': _activeRoomId,
-      'type': 'text',
-    });
-    _messageController.clear();
-  }
-
-  void _onTextChanged(String text) {
-    _socket.emit('typing', _activeRoomId);
-    if (_typingTimer?.isActive ?? false) _typingTimer!.cancel();
-    _typingTimer = Timer(
-      const Duration(milliseconds: 2000),
-      () => _socket.emit('stop_typing', _activeRoomId),
-    );
-  }
-
   @override
   void dispose() {
-    _typingTimer?.cancel();
     _messageController.dispose();
     _scrollController.dispose();
-
-    // SAFE REMOVAL: Only remove OUR specific listeners
-    _socket.off('chat_message', _messageHandler);
-    _socket.off('display_typing', _typingHandler);
-    _socket.off('hide_typing', _stopTypingHandler);
-
-    // Global generic listeners can be removed if strictly necessary,
-    // but usually better to leave generic ones or use named handlers for them too.
-    _socket.off('message:deleted');
-    _socket.off('conversation:read_ack');
-    _socket.off('message:status_update');
-    _socket.off('private_chat_ready');
-
     super.dispose();
   }
 
-  String _formatTime(String? isoString) {
-    if (isoString == null) return "Now";
-    try {
-      return DateFormat('jm').format(DateTime.parse(isoString).toLocal());
-    } catch (e) {
-      return "";
-    }
+  void _handleSend() {
+    ref.read(chatProvider.notifier).sendMessage(_messageController.text);
+    _messageController.clear();
+    // Small delay to ensure the new bubble is rendered before scrolling
+    Future.delayed(const Duration(milliseconds: 100), _scrollToBottom);
   }
 
   @override
   Widget build(BuildContext context) {
+    // 2. WATCH: This rebuilds the widget whenever ChatState changes
+    final chatState = ref.watch(chatProvider);
     final myUserId = ref.watch(authProvider).user?.id;
+
+    // 3. LISTEN: React to state changes (Auto-scroll when new messages arrive)
+    ref.listen(chatProvider, (previous, next) {
+      if (next.messages.length > (previous?.messages.length ?? 0)) {
+        Future.delayed(const Duration(milliseconds: 100), _scrollToBottom);
+      }
+    });
 
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -276,9 +93,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(widget.otherUserName, style: AppTheme.nameStyle),
-            if (_isTyping)
+            // Show typing indicator from state
+            if (chatState.isTyping)
               Text(
-                "$_typingUser is typing...",
+                "${chatState.typingUser ?? 'Someone'} is typing...",
                 style: TextStyle(
                   color: AppTheme.primary,
                   fontSize: 12,
@@ -294,9 +112,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             child: ListView.builder(
               controller: _scrollController,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
-              itemCount: _messages.length,
+              itemCount: chatState.messages.length,
               itemBuilder: (context, index) {
-                final msg = _messages[index];
+                final msg = chatState.messages[index];
                 final isMe = msg['sender_id'] == myUserId;
                 final isDeleted = msg['isDeleted'] == true;
 
@@ -323,8 +141,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                           Text(
                             "This message was deleted",
                             style: TextStyle(
-                              fontStyle: FontStyle.italic,
                               color: Colors.grey,
+                              fontStyle: FontStyle.italic,
                               fontSize: 13,
                             ),
                           ),
@@ -336,7 +154,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
                 return GestureDetector(
                   onLongPress: isMe
-                      ? () => _handleDeleteMessage(msg['_id'])
+                      ? () => _handleDeleteMessage(context, msg['_id'])
                       : null,
                   child: MessageBubble(
                     sender: msg['sender_name'] ?? 'Unknown',
@@ -350,6 +168,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               },
             ),
           ),
+          // INPUT AREA
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -365,7 +184,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             child: Row(
               children: [
                 IconButton(
-                  icon: _isUploading
+                  icon: chatState.isUploading
                       ? const SizedBox(
                           width: 24,
                           height: 24,
@@ -375,14 +194,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                           Icons.add_photo_alternate_rounded,
                           color: Colors.grey[600],
                         ),
-                  onPressed: _isUploading ? null : _handleImageSend,
+                  onPressed: chatState.isUploading
+                      ? null
+                      : () => ref.read(chatProvider.notifier).sendImage(),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: TextField(
                     controller: _messageController,
-                    onChanged: _onTextChanged,
-                    onSubmitted: (_) => sendMessage(),
+                    onChanged: (text) =>
+                        ref.read(chatProvider.notifier).sendTypingEvent(text),
+                    onSubmitted: (_) => _handleSend(),
                     decoration: InputDecoration(
                       hintText: "Type a message...",
                       filled: true,
@@ -410,7 +232,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                       color: Colors.white,
                       size: 20,
                     ),
-                    onPressed: sendMessage,
+                    onPressed: _handleSend,
                   ),
                 ),
               ],
@@ -419,5 +241,37 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         ],
       ),
     );
+  }
+
+  void _handleDeleteMessage(BuildContext context, String messageId) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Delete Message?"),
+        content: const Text("This will remove the message for everyone."),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("Cancel"),
+          ),
+          TextButton(
+            onPressed: () {
+              ref.read(chatProvider.notifier).deleteMessage(messageId);
+              Navigator.pop(ctx);
+            },
+            child: const Text("Delete", style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatTime(String? isoString) {
+    if (isoString == null) return "Now";
+    try {
+      return DateFormat('jm').format(DateTime.parse(isoString).toLocal());
+    } catch (e) {
+      return "";
+    }
   }
 }
