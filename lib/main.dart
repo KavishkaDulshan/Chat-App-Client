@@ -3,8 +3,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'screens/login_screen.dart';
 import 'screens/home_screen.dart';
 import 'providers/auth_provider.dart';
+import 'package:firebase_core/firebase_core.dart'; // <--- Import this
+import 'services/notification_service.dart'; // <--- Import your new service
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp();
+
+  // 2. Initialize Notifications
+  await NotificationService().initNotifications();
+
   runApp(const ProviderScope(child: ChatApp()));
 }
 

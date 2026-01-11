@@ -4,6 +4,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/user_model.dart';
 import '../config.dart';
+import 'package:firebase_messaging/firebase_messaging.dart'; // <--- NEW IMPORT
 
 final authServiceProvider = Provider((ref) => AuthService());
 
@@ -22,11 +23,12 @@ class AuthService {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final token = data['token'];
-        final userJson = data['user']; // The user object from backend
+        final userJson = data['user'];
 
         // 1. SAVE TOKEN & USER DATA
         await storage.write(key: 'jwt_token', value: token);
         await storage.write(key: 'user_data', value: jsonEncode(userJson));
+        await _syncFcmToken();
 
         return User.fromJson(userJson, token);
       } else {
@@ -38,13 +40,14 @@ class AuthService {
     return null;
   }
 
-  // === NEW: RESTORE SESSION ===
+  // === RESTORE SESSION ===
   Future<User?> tryAutoLogin() async {
     try {
       final token = await storage.read(key: 'jwt_token');
       final userStr = await storage.read(key: 'user_data');
 
       if (token != null && userStr != null) {
+        _syncFcmToken();
         final userJson = jsonDecode(userStr);
         return User.fromJson(userJson, token);
       }
@@ -54,12 +57,22 @@ class AuthService {
     return null;
   }
 
-  // === NEW: LOGOUT ===
+  Future<void> _syncFcmToken() async {
+    try {
+      final token = await FirebaseMessaging.instance.getToken();
+      if (token != null) {
+        await sendFcmToken(token);
+      }
+    } catch (e) {
+      print("FCM Sync Error: $e");
+    }
+  }
+
+  // === LOGOUT ===
   Future<void> logout() async {
     await storage.deleteAll();
   }
 
-  // ... (Keep register, searchUser, getConversations as they are) ...
   Future<bool> register(String username, String email, String password) async {
     try {
       final response = await http.post(
@@ -95,5 +108,27 @@ class AuthService {
       if (response.statusCode == 200) return jsonDecode(response.body);
     } catch (e) {}
     return [];
+  }
+
+  Future<void> sendFcmToken(String token) async {
+    try {
+      final jwtToken = await storage.read(key: 'jwt_token');
+      if (jwtToken == null) return;
+
+      final response = await http.post(
+        Uri.parse('$baseUrl/fcm-token'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $jwtToken',
+        },
+        body: jsonEncode({'token': token}),
+      );
+
+      if (response.statusCode == 200) {
+        print("✅ FCM Token sent to server");
+      }
+    } catch (e) {
+      print("❌ Failed to send FCM token: $e");
+    }
   }
 }
