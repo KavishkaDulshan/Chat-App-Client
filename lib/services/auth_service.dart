@@ -1,10 +1,12 @@
 import 'dart:convert';
+import 'dart:io'; // <--- ADDED: For Platform check
+import 'package:flutter/foundation.dart'; // <--- ADDED: For kIsWeb check
 import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/user_model.dart';
 import '../config.dart';
-import 'package:firebase_messaging/firebase_messaging.dart'; // <--- NEW IMPORT
+import 'package:firebase_messaging/firebase_messaging.dart';
 
 final authServiceProvider = Provider((ref) => AuthService());
 
@@ -28,6 +30,8 @@ class AuthService {
         // 1. SAVE TOKEN & USER DATA
         await storage.write(key: 'jwt_token', value: token);
         await storage.write(key: 'user_data', value: jsonEncode(userJson));
+
+        // Sync Token (Safe version)
         await _syncFcmToken();
 
         return User.fromJson(userJson, token);
@@ -47,7 +51,9 @@ class AuthService {
       final userStr = await storage.read(key: 'user_data');
 
       if (token != null && userStr != null) {
+        // Sync Token (Safe version)
         _syncFcmToken();
+
         final userJson = jsonDecode(userStr);
         return User.fromJson(userJson, token);
       }
@@ -57,7 +63,14 @@ class AuthService {
     return null;
   }
 
+  // === FIXED: WINDOWS SAFE FCM SYNC ===
   Future<void> _syncFcmToken() async {
+    // GUARD: If running on Windows, STOP here.
+    // FirebaseMessaging is not supported on Windows Desktop.
+    if (!kIsWeb && Platform.isWindows) {
+      return;
+    }
+
     try {
       final token = await FirebaseMessaging.instance.getToken();
       if (token != null) {
@@ -90,8 +103,6 @@ class AuthService {
     }
   }
 
-  // lib/services/auth_service.dart
-
   Future<Map<String, dynamic>?> searchUser(String username) async {
     try {
       // 1. Get the Token
@@ -107,7 +118,7 @@ class AuthService {
         Uri.parse('$baseUrl/search?username=$username'),
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token', // <--- THIS WAS MISSING
+          'Authorization': 'Bearer $token',
         },
       );
 
@@ -115,7 +126,6 @@ class AuthService {
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
       } else {
-        // Debug Log: Use this to see if it's 401 (Auth) or 404 (Not Found)
         print(
           "❌ Search Failed: Status ${response.statusCode} - ${response.body}",
         );
