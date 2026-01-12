@@ -90,13 +90,39 @@ class AuthService {
     }
   }
 
+  // lib/services/auth_service.dart
+
   Future<Map<String, dynamic>?> searchUser(String username) async {
     try {
+      // 1. Get the Token
+      final token = await storage.read(key: 'jwt_token');
+
+      if (token == null) {
+        print("⚠️ Search failed: No User Token found");
+        return null;
+      }
+
+      // 2. Send Request WITH Headers
       final response = await http.get(
         Uri.parse('$baseUrl/search?username=$username'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token', // <--- THIS WAS MISSING
+        },
       );
-      if (response.statusCode == 200) return jsonDecode(response.body);
-    } catch (e) {}
+
+      // 3. Handle Response
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      } else {
+        // Debug Log: Use this to see if it's 401 (Auth) or 404 (Not Found)
+        print(
+          "❌ Search Failed: Status ${response.statusCode} - ${response.body}",
+        );
+      }
+    } catch (e) {
+      print("❌ Search Error: $e");
+    }
     return null;
   }
 
