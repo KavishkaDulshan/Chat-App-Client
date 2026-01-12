@@ -6,6 +6,9 @@ import '../providers/socket_provider.dart';
 import '../services/auth_service.dart';
 import 'chat_screen.dart';
 import '../app_theme.dart';
+import 'dart:io';
+import 'package:flutter/foundation.dart';
+import '../services/notification_service.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -34,16 +37,27 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     _homeMessageHandler = (data) {
       if (!mounted) return;
 
-      // Acknowledge delivery
+      // 1. Get Current User ID & Check Sender
+      final myUserId = ref.read(authProvider).user?.id;
+      final senderId = data['sender_id'];
+      final isMe = senderId == myUserId;
+
+      // 2. Windows Notification Logic (FIXED)
+      // Only show if: Not Web, Is Windows, AND Sender is NOT me
+      if (!isMe && !kIsWeb && Platform.isWindows) {
+        NotificationService().showLocalNotification(
+          data['sender_name'] ?? "New Message",
+          data['content'] ?? "You have a new message",
+        );
+      }
+
+      // 3. Acknowledge delivery
       _socket.emit('message:delivered', {
         'messageId': data['_id'],
         'roomId': data['roomId'],
       });
 
       setState(() {
-        final myUserId = ref.read(authProvider).user?.id;
-        final isMe = data['sender_id'] == myUserId;
-
         final index = _conversations.indexWhere(
           (c) => c['id'] == data['roomId'],
         );
@@ -97,93 +111,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   void _setupSocketListeners() {
+    // Only attach the named handler (Prevent Duplication)
     if (!_socket.hasListeners('chat_message')) {
       _socket.on('chat_message', _homeMessageHandler);
     }
     if (!_socket.hasListeners('user_status_change')) {
       _socket.on('user_status_change', _statusHandler);
     }
-    _socket.on('chat_message', (data) {
-      if (!mounted) return;
+  }
 
-      // Acknowledge delivery
-      _socket.emit('message:delivered', {
-        'messageId': data['_id'],
-        'roomId': data['roomId'],
-      });
-
-      setState(() {
-        final myUserId = ref.read(authProvider).user?.id;
-        final isMe = data['sender_id'] == myUserId;
-
-        // 1. Find if chat exists in our local list
-        final index = _conversations.indexWhere(
-          (c) => c['id'] == data['roomId'],
-        );
-
-        if (index != -1) {
-          // --- EXISTING CHAT: Move to Top ---
-          final updatedChat = Map<String, dynamic>.from(_conversations[index]);
-          updatedChat['lastMessage'] = data['content'];
-          updatedChat['updatedAt'] = data['timestamp']; // Update time
-
-          _conversations.removeAt(index);
-          _conversations.insert(0, updatedChat);
-        } else {
-          // --- NEW CHAT: Insert Instantly (No API Call) ---
-
-          // If I am the receiver, the "Other User" is the sender.
-          // If I am the sender, I just created this chat, so I might need to load details.
-
-          if (!isMe) {
-            // Construct a temporary chat object from the message data
-            final newChat = {
-              'id': data['roomId'],
-              'lastMessage': data['content'],
-              'updatedAt': data['timestamp'],
-              'otherUser': {
-                '_id': data['sender_id'],
-                'username': data['sender_name'],
-                'is_online': true, // Safe assumption since they just messaged
-              },
-            };
-
-            _conversations.insert(0, newChat);
-          } else {
-            // Edge case: If I sent a message from a different device,
-            // I might not have the recipient's info here. Safe to reload.
-            _loadConversations();
-          }
-        }
-      });
-    });
-    // 2. NEW FIX: Listen for Online/Offline Status Changes
-    _socket.on('user_status_change', (data) {
-      if (!mounted) return;
-
-      setState(() {
-        // Iterate through all conversations to find the user who changed status
-        for (var chat in _conversations) {
-          final otherUser = chat['otherUser'];
-
-          // Check if this chat belongs to the user who just changed status
-          // We check both '_id' and 'id' to be safe with MongoDB mapping
-          if (otherUser != null &&
-              (otherUser['_id'] == data['userId'] ||
-                  otherUser['id'] == data['userId'])) {
-            // Update the status locally
-            otherUser['is_online'] = data['isOnline'];
-          }
-        }
-      });
-    });
-    @override
-    void dispose() {
-      // Remove ONLY these specific listeners
-      _socket.off('chat_message', _homeMessageHandler);
-      _socket.off('user_status_change', _statusHandler);
-      super.dispose();
-    }
+  @override
+  void dispose() {
+    // Remove listeners cleanly
+    _socket.off('chat_message', _homeMessageHandler);
+    _socket.off('user_status_change', _statusHandler);
+    super.dispose();
   }
 
   Future<void> _loadConversations() async {

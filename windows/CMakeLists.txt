@@ -1,5 +1,10 @@
 # Project-level configuration.
 cmake_minimum_required(VERSION 3.15)
+
+# === ADD THIS LINE TO FIX FIREBASE ERROR ===
+set(CMAKE_POLICY_VERSION_MINIMUM "3.15")
+# ===========================================
+
 project(chat_client LANGUAGES CXX)
 
 # The name of the executable created for the application. Change this to change
