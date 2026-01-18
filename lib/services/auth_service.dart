@@ -167,4 +167,35 @@ class AuthService {
       print("❌ Failed to send FCM token: $e");
     }
   }
+
+  // NEW: Verify OTP
+  Future<User?> verifyOTP(String email, String otp) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/verify-otp'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'email': email, 'otp': otp}),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final token = data['token'];
+        final userJson = data['user'];
+
+        // Save session just like login
+        await storage.write(key: 'jwt_token', value: token);
+        await storage.write(key: 'user_data', value: jsonEncode(userJson));
+
+        // Sync Token
+        _syncFcmToken();
+
+        return User.fromJson(userJson, token);
+      } else {
+        print('Verification Failed: ${response.body}');
+      }
+    } catch (e) {
+      print('Verification Error: $e');
+    }
+    return null;
+  }
 }

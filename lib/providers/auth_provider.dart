@@ -74,4 +74,23 @@ class AuthController extends Notifier<AuthState> {
     await ref.read(authServiceProvider).logout();
     state = AuthState();
   }
+
+  Future<bool> verifyOTP(String email, String otp) async {
+    state = AuthState(isLoading: true);
+    final authService = ref.read(authServiceProvider);
+
+    final user = await authService.verifyOTP(email, otp);
+
+    if (user != null) {
+      _connectSocket(user);
+      state = AuthState(user: user, isLoading: false);
+      return true;
+    } else {
+      state = AuthState(
+        isLoading: false,
+        errorMessage: "Invalid OTP or Expired.",
+      );
+      return false;
+    }
+  }
 }

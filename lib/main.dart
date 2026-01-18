@@ -49,9 +49,8 @@ class _ChatAppState extends ConsumerState<ChatApp> {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'ViralChat',
-      home: authState.isLoading
-          ? const Scaffold(body: Center(child: CircularProgressIndicator()))
-          : (authState.user != null ? const HomeScreen() : const LoginScreen()),
+      // ✅ CORRECT: Let LoginScreen handle its own loading
+      home: authState.user != null ? const HomeScreen() : const LoginScreen(),
     );
   }
 }
