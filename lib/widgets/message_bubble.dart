@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import '../app_theme.dart';
-import '../screens/full_screen_image.dart'; // <--- 1. ADD THIS IMPORT
+import '../screens/full_screen_image.dart';
 
 class MessageBubble extends StatelessWidget {
-  // ... (Your existing variables: sender, text, time, etc. keep them same)
   final String sender;
+  final String? senderAvatar; // <--- NEW FIELD
   final String text;
   final String time;
   final bool isMe;
@@ -14,6 +14,7 @@ class MessageBubble extends StatelessWidget {
   const MessageBubble({
     super.key,
     required this.sender,
+    this.senderAvatar, // <--- Add to constructor
     required this.text,
     required this.time,
     required this.isMe,
@@ -23,122 +24,158 @@ class MessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Align(
-      alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 12),
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.75,
-        ),
-        child: Column(
-          crossAxisAlignment: isMe
-              ? CrossAxisAlignment.end
-              : CrossAxisAlignment.start,
-          children: [
-            if (!isMe)
-              Padding(
-                padding: const EdgeInsets.only(left: 12, bottom: 4),
-                child: Text(
-                  sender,
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.grey[600],
-                  ),
-                ),
-              ),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: Row(
+        mainAxisAlignment: isMe
+            ? MainAxisAlignment.end
+            : MainAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.end, // Align avatar to bottom
+        children: [
+          // 1. SHOW AVATAR (Only for other users)
+          if (!isMe) ...[
+            CircleAvatar(
+              radius: 16,
+              backgroundColor: Colors.grey[300],
+              backgroundImage:
+                  (senderAvatar != null && senderAvatar!.isNotEmpty)
+                  ? NetworkImage(senderAvatar!)
+                  : null,
+              child: (senderAvatar == null || senderAvatar!.isEmpty)
+                  ? Text(
+                      sender.isNotEmpty ? sender[0].toUpperCase() : "?",
+                      style: const TextStyle(fontSize: 12, color: Colors.black),
+                    )
+                  : null,
+            ),
+            const SizedBox(width: 8),
+          ],
 
-            // Bubble Container
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(
-                color: isMe
-                    ? AppTheme.myMessageColor
-                    : AppTheme.otherMessageColor,
-                borderRadius: BorderRadius.only(
-                  topLeft: const Radius.circular(20),
-                  topRight: const Radius.circular(20),
-                  bottomLeft: isMe
-                      ? const Radius.circular(20)
-                      : const Radius.circular(4),
-                  bottomRight: isMe
-                      ? const Radius.circular(4)
-                      : const Radius.circular(20),
-                ),
-              ),
-              // --- 2. THE FIX STARTS HERE ---
-              child: type == 'image'
-                  ? GestureDetector(
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) =>
-                                FullScreenImage(imageUrl: text),
-                          ),
-                        );
-                      },
-                      child: Hero(
-                        tag: text, // Unique tag for animation (using URL)
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: Image.network(
-                            text, // This is your image URL
-                            height: 150,
-                            width: 200,
-                            fit: BoxFit.cover, // Keep thumbnail cropped nicely
-                            loadingBuilder: (ctx, child, progress) {
-                              if (progress == null) return child;
-                              return SizedBox(
-                                height: 150,
-                                width: 200,
-                                child: Center(
-                                  child: CircularProgressIndicator(
-                                    color: isMe
-                                        ? Colors.white
-                                        : AppTheme.primary,
+          // 2. MESSAGE CONTENT
+          Flexible(
+            child: Column(
+              crossAxisAlignment: isMe
+                  ? CrossAxisAlignment.end
+                  : CrossAxisAlignment.start,
+              children: [
+                // Sender Name (Only if not me)
+                if (!isMe)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 4, bottom: 4),
+                    child: Text(
+                      sender,
+                      style: const TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
+                  ),
+
+                // The Bubble
+                Container(
+                  constraints: BoxConstraints(
+                    maxWidth: MediaQuery.of(context).size.width * 0.75,
+                  ),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: isMe ? AppTheme.primary : Colors.grey[200],
+                    borderRadius: BorderRadius.only(
+                      topLeft: const Radius.circular(20),
+                      topRight: const Radius.circular(20),
+                      bottomLeft: isMe
+                          ? const Radius.circular(20)
+                          : Radius.zero,
+                      bottomRight: isMe
+                          ? Radius.zero
+                          : const Radius.circular(20),
+                    ),
+                  ),
+                  child: type == 'image'
+                      ? GestureDetector(
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => FullScreenImage(imageUrl: text),
+                              ),
+                            );
+                          },
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: Image.network(
+                              text,
+                              height: 200,
+                              width: double.infinity,
+                              fit: BoxFit.cover,
+                              loadingBuilder: (ctx, child, loadingProgress) {
+                                if (loadingProgress == null) return child;
+                                return SizedBox(
+                                  height: 200,
+                                  child: Center(
+                                    child: CircularProgressIndicator(
+                                      value:
+                                          loadingProgress.expectedTotalBytes !=
+                                              null
+                                          ? loadingProgress
+                                                    .cumulativeBytesLoaded /
+                                                loadingProgress
+                                                    .expectedTotalBytes!
+                                          : null,
+                                      color: isMe
+                                          ? Colors.white
+                                          : AppTheme.primary,
+                                    ),
                                   ),
-                                ),
-                              );
-                            },
+                                );
+                              },
+                              errorBuilder: (context, error, stackTrace) {
+                                return const SizedBox(
+                                  height: 200,
+                                  child: Center(
+                                    child: Icon(
+                                      Icons.broken_image,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        )
+                      : Text(
+                          text,
+                          style: TextStyle(
+                            color: isMe ? Colors.white : Colors.black87,
+                            fontSize: 15,
                           ),
                         ),
-                      ),
-                    )
-                  : Text(
-                      // Standard Text Message
-                      text,
-                      style: TextStyle(
-                        color: isMe ? Colors.white : AppTheme.textPrimary,
-                        fontSize: 15,
-                      ),
-                    ),
-              // --- FIX ENDS HERE ---
-            ),
+                ),
 
-            // Time & Ticks logic (Keep exactly as it was)
-            Padding(
-              padding: const EdgeInsets.only(top: 4, right: 4),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    time,
-                    style: TextStyle(fontSize: 10, color: Colors.grey[500]),
+                // Time & Status
+                Padding(
+                  padding: const EdgeInsets.only(top: 4, right: 4),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        time,
+                        style: TextStyle(fontSize: 10, color: Colors.grey[500]),
+                      ),
+                      if (isMe) ...[
+                        const SizedBox(width: 4),
+                        Icon(
+                          status == 'sent' ? Icons.check : Icons.done_all,
+                          size: 14,
+                          color: status == 'read' ? Colors.blue : Colors.grey,
+                        ),
+                      ],
+                    ],
                   ),
-                  if (isMe) ...[
-                    const SizedBox(width: 4),
-                    Icon(
-                      status == 'sent' ? Icons.check : Icons.done_all,
-                      size: 14,
-                      color: status == 'read' ? Colors.blue : Colors.grey,
-                    ),
-                  ],
-                ],
-              ),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

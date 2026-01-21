@@ -1,6 +1,6 @@
 import 'dart:convert';
-import 'dart:io'; // <--- ADDED: For Platform check
-import 'package:flutter/foundation.dart'; // <--- ADDED: For kIsWeb check
+import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -14,6 +14,7 @@ class AuthService {
   String get baseUrl => AppConfig.baseUrl;
   final storage = const FlutterSecureStorage();
 
+  // --- LOGIN ---
   Future<User?> login(String email, String password) async {
     try {
       final response = await http.post(
@@ -27,65 +28,20 @@ class AuthService {
         final token = data['token'];
         final userJson = data['user'];
 
-        // 1. SAVE TOKEN & USER DATA
         await storage.write(key: 'jwt_token', value: token);
         await storage.write(key: 'user_data', value: jsonEncode(userJson));
 
-        // Sync Token (Safe version)
-        await _syncFcmToken();
+        _syncFcmToken(); // Sync token on login
 
         return User.fromJson(userJson, token);
-      } else {
-        print('Login Failed: ${response.body}');
       }
     } catch (e) {
-      print('Login Error: $e');
+      print("Login Error: $e");
     }
     return null;
   }
 
-  // === RESTORE SESSION ===
-  Future<User?> tryAutoLogin() async {
-    try {
-      final token = await storage.read(key: 'jwt_token');
-      final userStr = await storage.read(key: 'user_data');
-
-      if (token != null && userStr != null) {
-        // Sync Token (Safe version)
-        _syncFcmToken();
-
-        final userJson = jsonDecode(userStr);
-        return User.fromJson(userJson, token);
-      }
-    } catch (e) {
-      print("Auto Login Error: $e");
-    }
-    return null;
-  }
-
-  // === FIXED: WINDOWS SAFE FCM SYNC ===
-  Future<void> _syncFcmToken() async {
-    // GUARD: If running on Windows, STOP here.
-    // FirebaseMessaging is not supported on Windows Desktop.
-    if (!kIsWeb && Platform.isWindows) {
-      return;
-    }
-
-    try {
-      final token = await FirebaseMessaging.instance.getToken();
-      if (token != null) {
-        await sendFcmToken(token);
-      }
-    } catch (e) {
-      print("FCM Sync Error: $e");
-    }
-  }
-
-  // === LOGOUT ===
-  Future<void> logout() async {
-    await storage.deleteAll();
-  }
-
+  // --- REGISTER ---
   Future<bool> register(String username, String email, String password) async {
     try {
       final response = await http.post(
@@ -99,76 +55,12 @@ class AuthService {
       );
       return response.statusCode == 201;
     } catch (e) {
+      print("Register Error: $e");
       return false;
     }
   }
 
-  Future<Map<String, dynamic>?> searchUser(String username) async {
-    try {
-      // 1. Get the Token
-      final token = await storage.read(key: 'jwt_token');
-
-      if (token == null) {
-        print("⚠️ Search failed: No User Token found");
-        return null;
-      }
-
-      // 2. Send Request WITH Headers
-      final response = await http.get(
-        Uri.parse('$baseUrl/search?username=$username'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-      );
-
-      // 3. Handle Response
-      if (response.statusCode == 200) {
-        return jsonDecode(response.body);
-      } else {
-        print(
-          "❌ Search Failed: Status ${response.statusCode} - ${response.body}",
-        );
-      }
-    } catch (e) {
-      print("❌ Search Error: $e");
-    }
-    return null;
-  }
-
-  Future<List<dynamic>> getConversations(String userId) async {
-    try {
-      final response = await http.get(
-        Uri.parse('$baseUrl/conversations/$userId'),
-      );
-      if (response.statusCode == 200) return jsonDecode(response.body);
-    } catch (e) {}
-    return [];
-  }
-
-  Future<void> sendFcmToken(String token) async {
-    try {
-      final jwtToken = await storage.read(key: 'jwt_token');
-      if (jwtToken == null) return;
-
-      final response = await http.post(
-        Uri.parse('$baseUrl/fcm-token'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $jwtToken',
-        },
-        body: jsonEncode({'token': token}),
-      );
-
-      if (response.statusCode == 200) {
-        print("✅ FCM Token sent to server");
-      }
-    } catch (e) {
-      print("❌ Failed to send FCM token: $e");
-    }
-  }
-
-  // NEW: Verify OTP
+  // --- VERIFY OTP ---
   Future<User?> verifyOTP(String email, String otp) async {
     try {
       final response = await http.post(
@@ -182,20 +74,124 @@ class AuthService {
         final token = data['token'];
         final userJson = data['user'];
 
-        // Save session just like login
         await storage.write(key: 'jwt_token', value: token);
         await storage.write(key: 'user_data', value: jsonEncode(userJson));
 
-        // Sync Token
         _syncFcmToken();
 
         return User.fromJson(userJson, token);
-      } else {
-        print('Verification Failed: ${response.body}');
       }
     } catch (e) {
-      print('Verification Error: $e');
+      print("Verification Error: $e");
     }
     return null;
+  }
+
+  // --- SEARCH USER ---
+  Future<List<dynamic>> searchUser(String query) async {
+    try {
+      final token = await storage.read(key: 'jwt_token');
+      if (token == null) return [];
+
+      final response = await http.get(
+        Uri.parse('$baseUrl/search?username=$query'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data is List) return data;
+        return [];
+      }
+    } catch (e) {
+      print("Search Error: $e");
+    }
+    return [];
+  }
+
+  // --- NEW: GET CONVERSATIONS (Fixes "Tap to chat") ---
+  Future<List<dynamic>> getConversations() async {
+    try {
+      final token = await storage.read(key: 'jwt_token');
+      final userData = await storage.read(key: 'user_data');
+      if (token == null || userData == null) return [];
+
+      final user = User.fromJson(jsonDecode(userData), token);
+
+      // Note: Make sure your backend has app.use('/api/chat', chatRoutes)
+      final response = await http.get(
+        Uri.parse('$baseUrl/chat/conversations/${user.id}'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      } else {
+        print("Get Chat Failed: ${response.statusCode} - ${response.body}");
+      }
+    } catch (e) {
+      print("Get Conversations Error: $e");
+    }
+    return [];
+  }
+
+  // --- AUTO LOGIN ---
+  Future<User?> tryAutoLogin() async {
+    try {
+      final token = await storage.read(key: 'jwt_token');
+      final userData = await storage.read(key: 'user_data');
+
+      if (token != null && userData != null) {
+        _syncFcmToken(); // Sync on auto-login
+        return User.fromJson(jsonDecode(userData), token);
+      }
+    } catch (e) {
+      print("Auto Login Error: $e");
+    }
+    return null;
+  }
+
+  // --- LOGOUT ---
+  Future<void> logout() async {
+    await storage.delete(key: 'jwt_token');
+    await storage.delete(key: 'user_data');
+  }
+
+  // --- FCM TOKEN SYNC ---
+  Future<void> _syncFcmToken() async {
+    if (kIsWeb || Platform.isWindows) return;
+
+    try {
+      final fcmToken = await FirebaseMessaging.instance.getToken();
+      if (fcmToken != null) {
+        await _sendFcmTokenToServer(fcmToken);
+      }
+    } catch (e) {
+      print("FCM Sync Error: $e");
+    }
+  }
+
+  Future<void> _sendFcmTokenToServer(String token) async {
+    try {
+      final jwtToken = await storage.read(key: 'jwt_token');
+      if (jwtToken == null) return;
+
+      await http.post(
+        Uri.parse('$baseUrl/fcm-token'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $jwtToken',
+        },
+        body: jsonEncode({'token': token}),
+      );
+    } catch (e) {
+      print("Failed to send FCM token: $e");
+    }
   }
 }

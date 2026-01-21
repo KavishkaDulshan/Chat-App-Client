@@ -30,6 +30,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    // 1. Load conversations immediately on startup
     _loadConversations();
     _socket = ref.read(socketServiceProvider).socket;
 
@@ -37,13 +38,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     _homeMessageHandler = (data) {
       if (!mounted) return;
 
-      // 1. Get Current User ID & Check Sender
       final myUserId = ref.read(authProvider).user?.id;
       final senderId = data['sender_id'];
       final isMe = senderId == myUserId;
 
-      // 2. Windows Notification Logic (FIXED)
-      // Only show if: Not Web, Is Windows, AND Sender is NOT me
       if (!isMe && !kIsWeb && Platform.isWindows) {
         NotificationService().showLocalNotification(
           data['sender_name'] ?? "New Message",
@@ -51,7 +49,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         );
       }
 
-      // 3. Acknowledge delivery
+      // Acknowledge
       _socket.emit('message:delivered', {
         'messageId': data['_id'],
         'roomId': data['roomId'],
@@ -63,30 +61,28 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         );
 
         if (index != -1) {
-          // EXISTING CHAT: Move to top
           final updatedChat = Map<String, dynamic>.from(_conversations[index]);
           updatedChat['lastMessage'] = data['content'];
           updatedChat['updatedAt'] = data['timestamp'];
           _conversations.removeAt(index);
           _conversations.insert(0, updatedChat);
         } else {
-          // NEW CHAT: Create locally
+          // New Chat Logic
           if (!isMe) {
-            // ROBUST CONSTRUCTION matching your MongoDB structure
             final newChat = {
               'id': data['roomId'],
               'lastMessage': data['content'],
               'updatedAt': data['timestamp'],
               'otherUser': {
                 '_id': data['sender_id'],
-                'id': data['sender_id'], // Add both ID styles to be safe
+                'id': data['sender_id'],
                 'username': data['sender_name'] ?? 'User',
+                'profile_pic': data['sender_avatar'], // Handle avatar
                 'is_online': true,
               },
             };
             _conversations.insert(0, newChat);
           } else {
-            // If I sent it (multi-device), safe to reload
             _loadConversations();
           }
         }
@@ -111,7 +107,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   void _setupSocketListeners() {
-    // Only attach the named handler (Prevent Duplication)
     if (!_socket.hasListeners('chat_message')) {
       _socket.on('chat_message', _homeMessageHandler);
     }
@@ -122,7 +117,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   @override
   void dispose() {
-    // Remove listeners cleanly
     _socket.off('chat_message', _homeMessageHandler);
     _socket.off('user_status_change', _statusHandler);
     super.dispose();
@@ -131,32 +125,38 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Future<void> _loadConversations() async {
     final user = ref.read(authProvider).user;
     if (user == null) return;
+
+    // This call will now work because we fixed the Backend URL
     final conversations = await ref
         .read(authServiceProvider)
-        .getConversations(user.id);
-    if (mounted)
+        .getConversations(); // Passed implicitly inside service or pass ID if needed
+
+    if (mounted) {
       setState(() {
         _conversations = conversations;
         _isLoading = false;
       });
+    }
   }
 
   void _joinChat(Map<String, dynamic> otherUser) {
     final myUser = ref.read(authProvider).user;
     if (myUser == null) return;
 
-    // Temporary ID until socket resolves real one
-    final ids = [myUser.id, otherUser['_id'] ?? otherUser['id']];
+    // Robust ID extraction
+    final otherUserId = otherUser['_id'] ?? otherUser['id'];
+
+    final ids = [myUser.id, otherUserId];
     ids.sort();
     final tempRoomId = ids.join('_');
 
-    // FIX: Pass 'id' explicitly
-    final otherUserId = otherUser['_id'] ?? otherUser['id'];
+    // Notify server we are joining (important for history)
+    _socket.emit('join_private_chat', otherUserId);
 
     final chatData = {
       'roomId': tempRoomId,
-      'otherUserId': otherUserId, // Pass ID
-      'otherUser': otherUser,
+      'otherUserId': otherUserId,
+      'otherUser': otherUser, // Contains username, profile_pic
     };
 
     if (MediaQuery.of(context).size.width > 800) {
@@ -166,38 +166,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         context,
         MaterialPageRoute(
           builder: (_) => ChatScreen(
-            otherUserName: otherUser['username'],
-            otherUserId: otherUserId, // Pass ID
+            otherUserName: otherUser['username'] ?? 'User',
+            otherUserId: otherUserId,
             roomId: tempRoomId,
-            initialHistory: [],
+            initialHistory: const [],
             isDesktop: false,
           ),
         ),
       ).then((_) => _loadConversations());
     }
-  }
-
-  void _handleLogout() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Logout'),
-        content: const Text('Are you sure you want to logout?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              ref.read(authProvider.notifier).logout();
-            },
-            child: const Text('Logout', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
   }
 
   void _showSearchDialog() {
@@ -219,19 +196,50 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             onPressed: () async {
               final username = searchController.text.trim();
               if (username.isEmpty) return;
+
               Navigator.pop(ctx);
-              final result = await ref
+
+              // 1. SEARCH RETURNS A LIST
+              final List<dynamic> results = await ref
                   .read(authServiceProvider)
                   .searchUser(username);
-              if (result != null && mounted)
-                _joinChat(result);
-              else if (mounted)
-                ScaffoldMessenger.of(
-                  context,
-                ).showSnackBar(const SnackBar(content: Text("User not found")));
+
+              if (mounted) {
+                if (results.isNotEmpty) {
+                  // 2. JOIN THE FIRST RESULT (Fixes the crash)
+                  _joinChat(results[0]);
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text("User not found")),
+                  );
+                }
+              }
             },
             style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primary),
             child: const Text("Chat", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _handleLogout() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Logout'),
+        content: const Text('Are you sure you want to logout?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              ref.read(authProvider.notifier).logout();
+            },
+            child: const Text('Logout', style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
@@ -277,8 +285,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                 key: ValueKey(_selectedChat!['roomId']),
                                 otherUserName:
                                     _selectedChat!['otherUser']['username'],
-                                otherUserId:
-                                    _selectedChat!['otherUserId'], // Pass ID
+                                otherUserId: _selectedChat!['otherUserId'],
                                 roomId: _selectedChat!['roomId'],
                                 initialHistory: const [],
                                 isDesktop: true,
@@ -295,10 +302,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   Widget _buildChatList({required bool isDesktop}) {
-    if (_conversations.isEmpty)
+    if (_conversations.isEmpty) {
       return Center(
         child: Text("No messages yet", style: AppTheme.subTitleStyle),
       );
+    }
 
     return ListView.builder(
       itemCount: _conversations.length,
@@ -306,7 +314,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       itemBuilder: (context, index) {
         final chat = _conversations[index];
         final otherUser = chat['otherUser'];
+
+        // Safety Check
         if (otherUser == null) return const SizedBox.shrink();
+
         final isSelected =
             isDesktop &&
             _selectedChat != null &&
@@ -323,15 +334,24 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               children: [
                 CircleAvatar(
                   radius: 28,
-                  backgroundColor: AppTheme.primary,
-                  child: Text(
-                    (otherUser['username'] as String)[0].toUpperCase(),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
+                  backgroundColor: AppTheme.primary.withOpacity(0.2),
+                  backgroundImage:
+                      (otherUser['profile_pic'] != null &&
+                          otherUser['profile_pic'] != "")
+                      ? NetworkImage(otherUser['profile_pic'])
+                      : null,
+                  child:
+                      (otherUser['profile_pic'] == null ||
+                          otherUser['profile_pic'] == "")
+                      ? Text(
+                          (otherUser['username'] as String)[0].toUpperCase(),
+                          style: const TextStyle(
+                            color: AppTheme.primary,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        )
+                      : null,
                 ),
                 if (otherUser['is_online'] == true)
                   Positioned(

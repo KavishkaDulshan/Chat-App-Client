@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../providers/auth_provider.dart';
-import '../providers/chat_provider.dart'; // Import the new provider
+import '../providers/chat_provider.dart';
 import '../widgets/message_bubble.dart';
 import '../app_theme.dart';
 
@@ -34,8 +34,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   @override
   void initState() {
     super.initState();
-    // 1. BOOTSTRAP: Tell the controller to join the chat
-    // We use Future.microtask to avoid "setState during build" errors
     Future.microtask(() {
       ref
           .read(chatProvider.notifier)
@@ -43,7 +41,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     });
   }
 
-  // Helper to scroll to bottom
   void _scrollToBottom() {
     if (_scrollController.hasClients) {
       _scrollController.animateTo(
@@ -62,19 +59,19 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   void _handleSend() {
-    ref.read(chatProvider.notifier).sendMessage(_messageController.text);
+    final text = _messageController.text.trim();
+    if (text.isEmpty) return;
+
+    ref.read(chatProvider.notifier).sendMessage(text);
     _messageController.clear();
-    // Small delay to ensure the new bubble is rendered before scrolling
     Future.delayed(const Duration(milliseconds: 100), _scrollToBottom);
   }
 
   @override
   Widget build(BuildContext context) {
-    // 2. WATCH: This rebuilds the widget whenever ChatState changes
     final chatState = ref.watch(chatProvider);
     final myUserId = ref.watch(authProvider).user?.id;
 
-    // 3. LISTEN: React to state changes (Auto-scroll when new messages arrive)
     ref.listen(chatProvider, (previous, next) {
       if (next.messages.length > (previous?.messages.length ?? 0)) {
         Future.delayed(const Duration(milliseconds: 100), _scrollToBottom);
@@ -93,7 +90,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(widget.otherUserName, style: AppTheme.nameStyle),
-            // Show typing indicator from state
             if (chatState.isTyping)
               Text(
                 "${chatState.typingUser ?? 'Someone'} is typing...",
@@ -158,6 +154,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                       : null,
                   child: MessageBubble(
                     sender: msg['sender_name'] ?? 'Unknown',
+                    // --- NEW: PASS AVATAR ---
+                    senderAvatar: msg['sender_avatar'],
+                    // ------------------------
                     text: msg['content'] ?? '',
                     time: _formatTime(msg['timestamp']),
                     isMe: isMe,
@@ -168,6 +167,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               },
             ),
           ),
+
           // INPUT AREA
           Container(
             padding: const EdgeInsets.all(16),
