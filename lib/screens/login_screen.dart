@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/auth_provider.dart';
-import '../providers/socket_provider.dart';
 import 'home_screen.dart';
 import '../app_theme.dart';
 import 'otp_verification_screen.dart'; // <--- IMPORTANT IMPORT

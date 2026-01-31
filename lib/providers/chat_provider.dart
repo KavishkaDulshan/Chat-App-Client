@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:image_picker/image_picker.dart'; // <-- ADDED THIS
 import '../services/image_service.dart';
-import '../services/socket_service.dart';
 import 'auth_provider.dart';
 import 'socket_provider.dart';
 
