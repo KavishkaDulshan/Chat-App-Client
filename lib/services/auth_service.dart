@@ -194,4 +194,33 @@ class AuthService {
       print("Failed to send FCM token: $e");
     }
   }
+
+  // Add this inside AuthService class
+  Future<User?> updateProfilePic(String userId, String imageUrl) async {
+    try {
+      final token = await storage.read(key: 'jwt_token');
+
+      final response = await http.put(
+        Uri.parse('$baseUrl/update-profile'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({
+          'userId': userId, // Ensure your backend expects 'userId' in body
+          'profile_pic': imageUrl,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        // Update local storage with new user data
+        await storage.write(key: 'user_data', value: jsonEncode(data));
+        return User.fromJson(data, token!);
+      }
+    } catch (e) {
+      print("Update Profile Error: $e");
+    }
+    return null;
+  }
 }

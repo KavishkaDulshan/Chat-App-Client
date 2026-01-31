@@ -6,6 +6,7 @@ import '../providers/socket_provider.dart';
 import 'chat_screen.dart';
 import '../app_theme.dart';
 import '../models/conversation.dart'; // Import the unified model
+import 'profile_screen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -78,6 +79,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         backgroundColor: Colors.white,
         elevation: 0,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.person, color: Colors.black),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const ProfileScreen()),
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.logout, color: Colors.red),
             onPressed: () => ref.read(authProvider.notifier).logout(),
