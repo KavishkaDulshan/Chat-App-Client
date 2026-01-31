@@ -7,6 +7,7 @@ import 'chat_screen.dart';
 import '../app_theme.dart';
 import '../models/conversation.dart'; // Import the unified model
 import 'profile_screen.dart';
+import 'login_screen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -42,13 +43,25 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         content: const Text("Are you sure you want to logout?"),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context), // Close dialog
+            onPressed: () => Navigator.pop(context), // Close Dialog
             child: const Text("Cancel"),
           ),
           TextButton(
-            onPressed: () {
-              Navigator.pop(context); // Close dialog
-              ref.read(authProvider.notifier).logout(); // Perform logout
+            onPressed: () async {
+              // Make this async
+              // 1. Close the Dialog
+              Navigator.pop(context);
+
+              // 2. Clear Riverpod State
+              await ref.read(authProvider.notifier).logout();
+
+              // 3. Force Navigate to Login & Clear Stack
+              if (mounted) {
+                Navigator.of(context).pushAndRemoveUntil(
+                  MaterialPageRoute(builder: (context) => const LoginScreen()),
+                  (route) => false, // This removes all previous routes
+                );
+              }
             },
             child: const Text("Logout", style: TextStyle(color: Colors.red)),
           ),
