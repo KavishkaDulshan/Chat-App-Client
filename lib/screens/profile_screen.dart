@@ -1,9 +1,10 @@
-import 'dart:io';
+// REMOVED: import 'dart:io'; <-- Caused Web Crash
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart'; // <-- ADDED THIS
 import '../providers/auth_provider.dart';
 import '../services/image_service.dart';
-import '../services/auth_service.dart'; // Import the updated service
+import '../services/auth_service.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
@@ -22,8 +23,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
     if (user == null) return;
 
-    // 1. Pick Image
-    final File? file = await imageService.pickImage();
+    // UPDATED: Now uses XFile instead of File
+    final XFile? file = await imageService.pickImage();
     if (file == null) return;
 
     setState(() => _isUploading = true);

@@ -1,7 +1,8 @@
 import 'dart:async';
-import 'dart:io';
+// REMOVED: import 'dart:io';  <-- Caused Web Crash
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
+import 'package:image_picker/image_picker.dart'; // <-- ADDED THIS
 import '../services/image_service.dart';
 import '../services/socket_service.dart';
 import 'auth_provider.dart';
@@ -45,13 +46,11 @@ class ChatState {
 }
 
 // --- 2. THE PROVIDER DEFINITION ---
-// We use .autoDispose to clean up resources when the user leaves the chat screen.
 final chatProvider = NotifierProvider.autoDispose<ChatController, ChatState>(
   ChatController.new,
 );
 
 // --- 3. THE CONTROLLER (LOGIC) ---
-// FIX: In Riverpod 3.0, we extends 'Notifier', NOT 'AutoDisposeNotifier'.
 class ChatController extends Notifier<ChatState> {
   late IO.Socket _socket;
   final ImageService _imageService = ImageService();
@@ -68,10 +67,8 @@ class ChatController extends Notifier<ChatState> {
 
   @override
   ChatState build() {
-    // 1. Initialize dependencies
     _socket = ref.read(socketServiceProvider).socket;
 
-    // 2. Define Cleanup Logic (Runs when the provider is destroyed)
     ref.onDispose(() {
       _typingTimer?.cancel();
       _socket.off('chat_message', _messageHandler);
@@ -83,10 +80,8 @@ class ChatController extends Notifier<ChatState> {
       _socket.off('message:deleted', _deleteHandler);
     });
 
-    // 3. Setup Logic
     _defineHandlers();
 
-    // 4. Return initial state
     return const ChatState();
   }
 
@@ -97,14 +92,12 @@ class ChatController extends Notifier<ChatState> {
     String otherUserId,
     List<Map<String, dynamic>> initialHistory,
   ) {
-    // Initialize state
     state = state.copyWith(
       activeRoomId: roomId,
       messages: List.from(initialHistory),
       isLoading: true,
     );
 
-    // Join via Socket
     _socket.emit('join_private_chat', otherUserId);
     _attachListeners();
   }
@@ -113,16 +106,11 @@ class ChatController extends Notifier<ChatState> {
     final myUserId = ref.read(authProvider).user?.id;
 
     _messageHandler = (data) {
-      // Guard against updates for other rooms
       if (data['roomId'] != state.activeRoomId) return;
-
-      // Prevent Duplicates
       if (state.messages.any((msg) => msg['_id'] == data['_id'])) return;
 
-      // Update State
       state = state.copyWith(messages: [...state.messages, data]);
 
-      // Emit Read Receipt
       if (data['sender_id'] != myUserId) {
         _socket.emit('conversation:read', {'roomId': state.activeRoomId});
       }
@@ -189,7 +177,6 @@ class ChatController extends Notifier<ChatState> {
   }
 
   void _attachListeners() {
-    // Safety check: remove before adding to prevent duplicates
     _socket.off('chat_message', _messageHandler);
     _socket.on('chat_message', _messageHandler);
 
@@ -223,7 +210,8 @@ class ChatController extends Notifier<ChatState> {
   }
 
   Future<void> sendImage() async {
-    final File? file = await _imageService.pickImage();
+    // UPDATED: Now uses XFile instead of File
+    final XFile? file = await _imageService.pickImage();
     if (file == null) return;
 
     state = state.copyWith(isUploading: true);

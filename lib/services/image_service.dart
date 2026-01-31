@@ -1,37 +1,48 @@
-import 'dart:io'; // <--- Import Platform
+import 'dart:typed_data'; // Needed for bytes
 import 'package:dio/dio.dart';
-import 'package:image_picker/image_picker.dart';
+import 'package:flutter/foundation.dart'; // Needed for kIsWeb
+import 'package:image_picker/image_picker.dart'; // Uses XFile
 import '../config.dart';
 
 class ImageService {
-  // DYNAMIC URL
   String get uploadUrl => '${AppConfig.baseUrl}/upload';
 
   final Dio _dio = Dio();
   final ImagePicker _picker = ImagePicker();
 
-  Future<File?> pickImage() async {
+  // ✅ FIXED: Return XFile? instead of File?
+  Future<XFile?> pickImage() async {
     try {
       final XFile? pickedFile = await _picker.pickImage(
         source: ImageSource.gallery,
         imageQuality: 70,
         maxWidth: 1080,
       );
-      if (pickedFile != null) return File(pickedFile.path);
+      return pickedFile;
     } catch (e) {
       print("Pick Error: $e");
     }
     return null;
   }
 
-  Future<String?> uploadImage(File file) async {
+  // ✅ FIXED: Accept XFile instead of File
+  Future<String?> uploadImage(XFile file) async {
     try {
-      String fileName = file.path.split('/').last;
-      FormData formData = FormData.fromMap({
-        "image": await MultipartFile.fromFile(file.path, filename: fileName),
-      });
+      FormData formData;
 
-      // Use the dynamic getter 'uploadUrl'
+      if (kIsWeb) {
+        // 🌐 WEB: Read bytes directly
+        Uint8List bytes = await file.readAsBytes();
+        formData = FormData.fromMap({
+          "image": MultipartFile.fromBytes(bytes, filename: file.name),
+        });
+      } else {
+        // 📱 MOBILE/DESKTOP: Use file path
+        formData = FormData.fromMap({
+          "image": await MultipartFile.fromFile(file.path, filename: file.name),
+        });
+      }
+
       Response response = await _dio.post(uploadUrl, data: formData);
 
       if (response.statusCode == 200) {
