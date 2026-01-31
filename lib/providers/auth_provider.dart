@@ -69,10 +69,18 @@ class AuthController extends Notifier<AuthState> {
   }
 
   Future<void> logout() async {
-    // FIX: Disconnect socket on logout
-    ref.read(socketServiceProvider).disconnect();
-    await ref.read(authServiceProvider).logout();
-    state = AuthState();
+    try {
+      // 1. Try to disconnect socket
+      ref.read(socketServiceProvider).disconnect();
+
+      // 2. Try to notify server
+      await ref.read(authServiceProvider).logout();
+    } catch (e) {
+      print("Logout Warning: $e");
+    } finally {
+      // 3. ALWAYS clear local state, even if errors occur above
+      state = AuthState();
+    }
   }
 
   Future<bool> verifyOTP(String email, String otp) async {

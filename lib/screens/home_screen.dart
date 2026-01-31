@@ -33,6 +33,30 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     super.dispose();
   }
 
+  // ✅ NEW: Logout Dialog Function
+  void _handleLogout() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Logout"),
+        content: const Text("Are you sure you want to logout?"),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context), // Close dialog
+            child: const Text("Cancel"),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context); // Close dialog
+              ref.read(authProvider.notifier).logout(); // Perform logout
+            },
+            child: const Text("Logout", style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _joinChat(Conversation conv) {
     final myUser = ref.read(authProvider).user;
     if (myUser == null) return;
@@ -86,9 +110,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               MaterialPageRoute(builder: (_) => const ProfileScreen()),
             ),
           ),
+          // ✅ FIX: Call the dialog function instead of direct logout
           IconButton(
             icon: const Icon(Icons.logout, color: Colors.red),
-            onPressed: () => ref.read(authProvider.notifier).logout(),
+            onPressed: _handleLogout,
           ),
         ],
       ),
