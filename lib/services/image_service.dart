@@ -30,19 +30,23 @@ class ImageService {
     try {
       FormData formData;
 
+      // ... inside uploadImage method ...
       if (kIsWeb) {
-        // 🌐 WEB: Read bytes directly
         Uint8List bytes = await file.readAsBytes();
         formData = FormData.fromMap({
-          "image": MultipartFile.fromBytes(bytes, filename: file.name),
+          "file": MultipartFile.fromBytes(
+            bytes,
+            filename: file.name,
+          ), // Changed 'image' to 'file'
         });
       } else {
-        // 📱 MOBILE/DESKTOP: Use file path
         formData = FormData.fromMap({
-          "image": await MultipartFile.fromFile(file.path, filename: file.name),
+          "file": await MultipartFile.fromFile(
+            file.path,
+            filename: file.name,
+          ), // Changed 'image' to 'file'
         });
       }
-
       Response response = await _dio.post(uploadUrl, data: formData);
 
       if (response.statusCode == 200) {

@@ -1,20 +1,22 @@
 import 'package:flutter/material.dart';
 import '../app_theme.dart';
 import '../screens/full_screen_image.dart';
+import 'audio_bubble.dart'; // ✅ Import the AudioBubble widget
 
 class MessageBubble extends StatelessWidget {
   final String sender;
-  final String? senderAvatar; // <--- NEW FIELD
+  final String? senderAvatar;
   final String text;
   final String time;
   final bool isMe;
   final String type;
   final String status;
+  // Note: If you add 'duration' to your message model later, pass it here too.
 
   const MessageBubble({
     super.key,
     required this.sender,
-    this.senderAvatar, // <--- Add to constructor
+    this.senderAvatar,
     required this.text,
     required this.time,
     required this.isMe,
@@ -30,7 +32,7 @@ class MessageBubble extends StatelessWidget {
         mainAxisAlignment: isMe
             ? MainAxisAlignment.end
             : MainAxisAlignment.start,
-        crossAxisAlignment: CrossAxisAlignment.end, // Align avatar to bottom
+        crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           // 1. SHOW AVATAR (Only for other users)
           if (!isMe) ...[
@@ -90,6 +92,7 @@ class MessageBubble extends StatelessWidget {
                           : const Radius.circular(20),
                     ),
                   ),
+                  // ✅ UPDATED LOGIC HERE
                   child: type == 'image'
                       ? GestureDetector(
                           onTap: () {
@@ -141,6 +144,14 @@ class MessageBubble extends StatelessWidget {
                               },
                             ),
                           ),
+                        )
+                      : type ==
+                            'audio' // ✅ Check for Audio
+                      ? AudioBubble(
+                          url: text, // 'text' field contains the Audio URL
+                          isMe: isMe,
+                          // If you update your DB to store duration, pass it here:
+                          // duration: duration,
                         )
                       : Text(
                           text,

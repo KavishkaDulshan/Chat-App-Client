@@ -6,6 +6,7 @@ import '../providers/auth_provider.dart';
 import '../providers/chat_provider.dart';
 import '../widgets/message_bubble.dart';
 import '../app_theme.dart';
+import '../services/audio_service.dart'; // ✅ 1. Import AudioService
 
 class ChatScreen extends ConsumerStatefulWidget {
   final String otherUserName;
@@ -31,6 +32,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
 
+  // ✅ 2. Add Audio State & Service
+  final AudioService _audioService = AudioService();
+  bool _isRecording = false;
+
   @override
   void initState() {
     super.initState();
@@ -53,9 +58,30 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   @override
   void dispose() {
+    _audioService.dispose(); // ✅ Clean up recorder
     _messageController.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  // ✅ 3. Add Recording Logic
+  Future<void> _startRecording() async {
+    setState(() => _isRecording = true);
+    await _audioService.startRecording();
+  }
+
+  Future<void> _stopAndSendRecording() async {
+    setState(() => _isRecording = false);
+    final path = await _audioService.stopRecording();
+
+    if (path != null) {
+      // Upload and Send
+      final url = await _audioService.uploadAudio(path);
+      if (url != null) {
+        // We use the generic sendMessage with type 'audio'
+        ref.read(chatProvider.notifier).sendMessage(url, type: 'audio');
+      }
+    }
   }
 
   void _handleSend() {
@@ -64,6 +90,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
     ref.read(chatProvider.notifier).sendMessage(text);
     _messageController.clear();
+    setState(() {}); // Refresh UI to show Mic again
     Future.delayed(const Duration(milliseconds: 100), _scrollToBottom);
   }
 
@@ -154,9 +181,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                       : null,
                   child: MessageBubble(
                     sender: msg['sender_name'] ?? 'Unknown',
-                    // --- NEW: PASS AVATAR ---
                     senderAvatar: msg['sender_avatar'],
-                    // ------------------------
                     text: msg['content'] ?? '',
                     time: _formatTime(msg['timestamp']),
                     isMe: isMe,
@@ -202,8 +227,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 Expanded(
                   child: TextField(
                     controller: _messageController,
-                    onChanged: (text) =>
-                        ref.read(chatProvider.notifier).sendTypingEvent(text),
+                    onChanged: (text) {
+                      // ✅ Rebuild UI to toggle between Mic/Send
+                      setState(() {});
+                      ref.read(chatProvider.notifier).sendTypingEvent(text);
+                    },
                     onSubmitted: (_) => _handleSend(),
                     decoration: InputDecoration(
                       hintText: "Type a message...",
@@ -221,20 +249,48 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   ),
                 ),
                 const SizedBox(width: 12),
-                Container(
-                  decoration: const BoxDecoration(
-                    color: AppTheme.primary,
-                    shape: BoxShape.circle,
-                  ),
-                  child: IconButton(
-                    icon: const Icon(
-                      Icons.send_rounded,
-                      color: Colors.white,
-                      size: 20,
-                    ),
-                    onPressed: _handleSend,
-                  ),
-                ),
+
+                // ✅ 4. Dynamic Button (Mic vs Send)
+                _messageController.text.trim().isEmpty
+                    ? GestureDetector(
+                        onLongPressStart: (_) => _startRecording(),
+                        onLongPressEnd: (_) => _stopAndSendRecording(),
+                        child: Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: _isRecording ? Colors.red : AppTheme.primary,
+                            shape: BoxShape.circle,
+                            boxShadow: _isRecording
+                                ? [
+                                    BoxShadow(
+                                      color: Colors.red.withOpacity(0.5),
+                                      blurRadius: 10,
+                                      spreadRadius: 2,
+                                    ),
+                                  ]
+                                : null,
+                          ),
+                          child: Icon(
+                            _isRecording ? Icons.mic : Icons.mic_none,
+                            color: Colors.white,
+                            size: 20,
+                          ),
+                        ),
+                      )
+                    : Container(
+                        decoration: const BoxDecoration(
+                          color: AppTheme.primary,
+                          shape: BoxShape.circle,
+                        ),
+                        child: IconButton(
+                          icon: const Icon(
+                            Icons.send_rounded,
+                            color: Colors.white,
+                            size: 20,
+                          ),
+                          onPressed: _handleSend,
+                        ),
+                      ),
               ],
             ),
           ),

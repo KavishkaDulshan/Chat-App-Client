@@ -236,4 +236,15 @@ class ChatController extends Notifier<ChatState> {
       'roomId': state.activeRoomId,
     });
   }
+
+  // Add this method to ChatController
+
+  void sendVoiceMessage(String audioUrl, int durationInSeconds) {
+    _socket.emit('chat_message', {
+      'content': audioUrl,
+      'roomId': state.activeRoomId,
+      'type': 'audio',
+      'duration': durationInSeconds, // We send this metadata
+    });
+  }
 }
