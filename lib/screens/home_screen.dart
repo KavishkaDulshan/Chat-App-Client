@@ -234,14 +234,53 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ],
         ),
         title: Text(conv.otherUserName, style: AppTheme.nameStyle),
-        subtitle: Text(
-          conv.lastMessage,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: AppTheme.subTitleStyle,
-        ),
+        subtitle: _buildLastMessagePreview(conv),
+
         onTap: () => _joinChat(conv),
       ),
+    );
+  }
+
+  // ✅ NEW: Helper to format the last message preview
+  Widget _buildLastMessagePreview(Conversation conv) {
+    // Check for Cloudinary patterns or file extensions
+    // Note: Cloudinary often treats audio as "video" resource_type
+    final bool isAudio =
+        conv.lastMessage.contains('/video/upload/') ||
+        conv.lastMessage.endsWith('.m4a') ||
+        conv.lastMessage.endsWith('.mp3');
+
+    final bool isImage =
+        conv.lastMessage.contains('/image/upload/') ||
+        conv.lastMessage.endsWith('.jpg') ||
+        conv.lastMessage.endsWith('.png');
+
+    if (isAudio) {
+      return Row(
+        children: [
+          Icon(Icons.mic, size: 16, color: AppTheme.primary),
+          const SizedBox(width: 4),
+          const Text("Voice Message", style: TextStyle(color: Colors.grey)),
+        ],
+      );
+    }
+
+    if (isImage) {
+      return Row(
+        children: [
+          Icon(Icons.photo, size: 16, color: AppTheme.primary),
+          const SizedBox(width: 4),
+          const Text("Photo", style: TextStyle(color: Colors.grey)),
+        ],
+      );
+    }
+
+    // Default Text Message
+    return Text(
+      conv.lastMessage,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: AppTheme.subTitleStyle,
     );
   }
 }
