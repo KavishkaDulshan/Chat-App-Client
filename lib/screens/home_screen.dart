@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/auth_provider.dart';
-import '../providers/conversations_provider.dart';
+import '../providers/conversations_provider.dart'; // Import the new provider
 import '../providers/socket_provider.dart';
 import 'chat_screen.dart';
 import '../app_theme.dart';
-import '../models/conversation.dart';
+import '../models/conversation.dart'; // Import the unified model
 import 'profile_screen.dart';
 import 'login_screen.dart';
 
@@ -81,11 +81,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       roomId = ids.join("_");
     }
 
-    // Join Room
-    ref
-        .read(socketServiceProvider)
-        .socket
-        .emit('join_private_chat', conv.otherUserId);
+    // ❌ REMOVED: socket.emit('join_private_chat')
+    // We strictly navigate first. The ChatScreen will handle the connection
+    // in its initState to prevent the "Race Condition" (missing history).
 
     Navigator.push(
       context,
@@ -94,7 +92,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           otherUserName: conv.otherUserName,
           otherUserId: conv.otherUserId,
           roomId: roomId,
-          initialHistory: const [],
+          initialHistory: const [], // Pass empty, let ChatScreen fetch it
         ),
       ),
     ).then((_) {
@@ -130,12 +128,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ),
       body: Column(
         children: [
-          // 1. SEARCH BAR
+          // 1. CLEAN SEARCH BAR
           Container(
             padding: const EdgeInsets.all(16.0),
             color: Colors.white,
             child: TextField(
               controller: _searchController,
+              // Delegate logic to Provider
               onChanged: (val) =>
                   ref.read(conversationsProvider.notifier).searchUsers(val),
               decoration: InputDecoration(
@@ -229,14 +228,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ],
         ),
         title: Text(conv.otherUserName, style: AppTheme.nameStyle),
-        // ✅ UPDATED: Use the helper that checks for deleted messages first
+        // ✅ Uses the enhanced helper (Deleted > Audio > Image > Text)
         subtitle: _buildLastMessagePreview(conv),
         onTap: () => _joinChat(conv),
       ),
     );
   }
 
-  // ✅ NEW: Helper to format the last message preview
+  // ✅ Helper to format the last message preview
   Widget _buildLastMessagePreview(Conversation conv) {
     // 1. Check for DELETED message first (Priority 1)
     if (conv.lastMessageIsDeleted) {

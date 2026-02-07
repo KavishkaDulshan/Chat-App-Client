@@ -6,7 +6,7 @@ import '../providers/auth_provider.dart';
 import '../providers/chat_provider.dart';
 import '../widgets/message_bubble.dart';
 import '../app_theme.dart';
-import '../services/audio_service.dart'; // ✅ 1. Import AudioService
+import '../services/audio_service.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
   final String otherUserName;
@@ -32,13 +32,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
 
-  // ✅ 2. Add Audio State & Service
+  // Audio Service State
   final AudioService _audioService = AudioService();
   bool _isRecording = false;
 
   @override
   void initState() {
     super.initState();
+    // ✅ CRITICAL FIX:
+    // Connect to the socket ONLY when the screen is ready.
+    // This prevents "Missing History" race conditions.
     Future.microtask(() {
       ref
           .read(chatProvider.notifier)
@@ -58,13 +61,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   @override
   void dispose() {
-    _audioService.dispose(); // ✅ Clean up recorder
+    _audioService.dispose(); // Clean up audio resources
     _messageController.dispose();
     _scrollController.dispose();
     super.dispose();
   }
 
-  // ✅ 3. Add Recording Logic
+  // --- Audio Recording Logic ---
   Future<void> _startRecording() async {
     setState(() => _isRecording = true);
     await _audioService.startRecording();
@@ -75,10 +78,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final path = await _audioService.stopRecording();
 
     if (path != null) {
-      // Upload and Send
+      // 1. Upload Audio
       final url = await _audioService.uploadAudio(path);
+
+      // 2. Send Message
       if (url != null) {
-        // We use the generic sendMessage with type 'audio'
         ref.read(chatProvider.notifier).sendMessage(url, type: 'audio');
       }
     }
@@ -90,7 +94,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
     ref.read(chatProvider.notifier).sendMessage(text);
     _messageController.clear();
-    setState(() {}); // Refresh UI to show Mic again
+    setState(() {}); // Refresh UI (toggle Mic/Send button)
     Future.delayed(const Duration(milliseconds: 100), _scrollToBottom);
   }
 
@@ -99,6 +103,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final chatState = ref.watch(chatProvider);
     final myUserId = ref.watch(authProvider).user?.id;
 
+    // Auto-scroll when new messages arrive
     ref.listen(chatProvider, (previous, next) {
       if (next.messages.length > (previous?.messages.length ?? 0)) {
         Future.delayed(const Duration(milliseconds: 100), _scrollToBottom);
@@ -131,6 +136,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       ),
       body: Column(
         children: [
+          // --- Message List ---
           Expanded(
             child: ListView.builder(
               controller: _scrollController,
@@ -141,6 +147,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 final isMe = msg['sender_id'] == myUserId;
                 final isDeleted = msg['isDeleted'] == true;
 
+                // Handle Deleted Message UI
                 if (isDeleted) {
                   return Align(
                     alignment: isMe
@@ -193,7 +200,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             ),
           ),
 
-          // INPUT AREA
+          // --- Input Area ---
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -208,6 +215,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             ),
             child: Row(
               children: [
+                // Photo Button
                 IconButton(
                   icon: chatState.isUploading
                       ? const SizedBox(
@@ -224,12 +232,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                       : () => ref.read(chatProvider.notifier).sendImage(),
                 ),
                 const SizedBox(width: 8),
+
+                // Text Field
                 Expanded(
                   child: TextField(
                     controller: _messageController,
                     onChanged: (text) {
-                      // ✅ Rebuild UI to toggle between Mic/Send
-                      setState(() {});
+                      setState(() {}); // Toggle Mic/Send button
                       ref.read(chatProvider.notifier).sendTypingEvent(text);
                     },
                     onSubmitted: (_) => _handleSend(),
@@ -250,7 +259,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 ),
                 const SizedBox(width: 12),
 
-                // ✅ 4. Dynamic Button (Mic vs Send)
+                // Mic or Send Button
                 _messageController.text.trim().isEmpty
                     ? GestureDetector(
                         onLongPressStart: (_) => _startRecording(),

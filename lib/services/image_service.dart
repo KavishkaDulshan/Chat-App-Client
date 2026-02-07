@@ -1,4 +1,4 @@
-import 'dart:typed_data'; // Needed for bytes
+// Needed for bytes
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart'; // Needed for kIsWeb
 import 'package:image_picker/image_picker.dart'; // Uses XFile

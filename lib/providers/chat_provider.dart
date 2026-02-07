@@ -1,13 +1,11 @@
 import 'dart:async';
-// REMOVED: import 'dart:io';  <-- Caused Web Crash
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
-import 'package:image_picker/image_picker.dart'; // <-- ADDED THIS
+import 'package:image_picker/image_picker.dart';
 import '../services/image_service.dart';
 import 'auth_provider.dart';
 import 'socket_provider.dart';
 
-// --- 1. THE STATE (DATA) ---
 class ChatState {
   final List<Map<String, dynamic>> messages;
   final bool isLoading;
@@ -44,18 +42,15 @@ class ChatState {
   }
 }
 
-// --- 2. THE PROVIDER DEFINITION ---
 final chatProvider = NotifierProvider.autoDispose<ChatController, ChatState>(
   ChatController.new,
 );
 
-// --- 3. THE CONTROLLER (LOGIC) ---
 class ChatController extends Notifier<ChatState> {
   late IO.Socket _socket;
   final ImageService _imageService = ImageService();
   Timer? _typingTimer;
 
-  // Handler variables
   late Function(dynamic) _messageHandler;
   late Function(dynamic) _typingHandler;
   late Function(dynamic) _stopTypingHandler;
@@ -97,15 +92,21 @@ class ChatController extends Notifier<ChatState> {
       isLoading: true,
     );
 
-    _socket.emit('join_private_chat', otherUserId);
+    // ✅ FIX: Attach listeners BEFORE emitting to catch the immediate response
     _attachListeners();
+
+    // Now it is safe to ask the server
+    _socket.emit('join_private_chat', otherUserId);
   }
 
   void _defineHandlers() {
     final myUserId = ref.read(authProvider).user?.id;
 
     _messageHandler = (data) {
-      if (data['roomId'] != state.activeRoomId) return;
+      final incomingRoomId = data['roomId'].toString();
+
+      // Strict check to ensure we don't show messages from other chats
+      if (incomingRoomId != state.activeRoomId) return;
       if (state.messages.any((msg) => msg['_id'] == data['_id'])) return;
 
       state = state.copyWith(messages: [...state.messages, data]);
@@ -116,28 +117,33 @@ class ChatController extends Notifier<ChatState> {
     };
 
     _historyHandler = (data) {
+      final incomingRoomId = data['roomId'].toString();
+
       state = state.copyWith(
-        activeRoomId: data['roomId'],
+        activeRoomId:
+            incomingRoomId, // Updates ID if server resolved a different one
         messages: List<Map<String, dynamic>>.from(data['history']),
         isLoading: false,
       );
-      _socket.emit('conversation:read', {'roomId': data['roomId']});
+      _socket.emit('conversation:read', {'roomId': incomingRoomId});
     };
 
     _typingHandler = (data) {
       if (data['username'] == ref.read(authProvider).user?.username) return;
-      if (data['roomId'] != state.activeRoomId) return;
+      if (data['roomId'].toString() != state.activeRoomId) return;
       state = state.copyWith(isTyping: true, typingUser: data['username']);
     };
 
     _stopTypingHandler = (data) {
-      if (data is Map && data['roomId'] != state.activeRoomId) return;
+      if (data is Map && data['roomId'].toString() != state.activeRoomId)
+        return;
       state = state.copyWith(isTyping: false);
     };
 
     _readAckHandler = (data) {
       final readerId = data['readerId'];
-      if (data['roomId'] == state.activeRoomId && readerId != myUserId) {
+      if (data['roomId'].toString() == state.activeRoomId &&
+          readerId != myUserId) {
         final updatedMessages = state.messages.map((msg) {
           if (msg['sender_id'] == myUserId) {
             return {...msg, 'status': 'read'};
@@ -149,7 +155,7 @@ class ChatController extends Notifier<ChatState> {
     };
 
     _statusUpdateHandler = (data) {
-      if (data['roomId'] == state.activeRoomId) {
+      if (data['roomId'].toString() == state.activeRoomId) {
         final updatedMessages = state.messages.map((msg) {
           if (msg['_id'] == data['messageId']) {
             return {...msg, 'status': data['status']};
@@ -176,6 +182,7 @@ class ChatController extends Notifier<ChatState> {
   }
 
   void _attachListeners() {
+    // Remove first to avoid duplicates, then add
     _socket.off('chat_message', _messageHandler);
     _socket.on('chat_message', _messageHandler);
 
@@ -209,7 +216,6 @@ class ChatController extends Notifier<ChatState> {
   }
 
   Future<void> sendImage() async {
-    // UPDATED: Now uses XFile instead of File
     final XFile? file = await _imageService.pickImage();
     if (file == null) return;
 
@@ -237,14 +243,12 @@ class ChatController extends Notifier<ChatState> {
     });
   }
 
-  // Add this method to ChatController
-
   void sendVoiceMessage(String audioUrl, int durationInSeconds) {
     _socket.emit('chat_message', {
       'content': audioUrl,
       'roomId': state.activeRoomId,
       'type': 'audio',
-      'duration': durationInSeconds, // We send this metadata
+      'duration': durationInSeconds,
     });
   }
 }
