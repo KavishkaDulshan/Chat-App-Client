@@ -54,7 +54,7 @@ class _AudioBubbleState extends State<AudioBubble> {
     });
 
     _player.onDurationChanged.listen((dur) {
-      if (mounted && dur != null && dur.inSeconds > 0) {
+      if (mounted && dur.inSeconds > 0) {
         setState(() => _totalDuration = dur);
       }
     });

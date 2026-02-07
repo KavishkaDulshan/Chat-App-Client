@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/auth_provider.dart';
-import '../providers/conversations_provider.dart'; // Import the new provider
+import '../providers/conversations_provider.dart';
 import '../providers/socket_provider.dart';
 import 'chat_screen.dart';
 import '../app_theme.dart';
-import '../models/conversation.dart'; // Import the unified model
+import '../models/conversation.dart';
 import 'profile_screen.dart';
 import 'login_screen.dart';
 
@@ -34,7 +34,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     super.dispose();
   }
 
-  // ✅ NEW: Logout Dialog Function
+  // Logout Dialog Function
   void _handleLogout() {
     showDialog(
       context: context,
@@ -48,7 +48,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
           TextButton(
             onPressed: () async {
-              // Make this async
               // 1. Close the Dialog
               Navigator.pop(context);
 
@@ -123,7 +122,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               MaterialPageRoute(builder: (_) => const ProfileScreen()),
             ),
           ),
-          // ✅ FIX: Call the dialog function instead of direct logout
           IconButton(
             icon: const Icon(Icons.logout, color: Colors.red),
             onPressed: _handleLogout,
@@ -132,13 +130,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ),
       body: Column(
         children: [
-          // 1. CLEAN SEARCH BAR
+          // 1. SEARCH BAR
           Container(
             padding: const EdgeInsets.all(16.0),
             color: Colors.white,
             child: TextField(
               controller: _searchController,
-              // Delegate logic to Provider
               onChanged: (val) =>
                   ref.read(conversationsProvider.notifier).searchUsers(val),
               decoration: InputDecoration(
@@ -164,8 +161,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     itemCount: convState.conversations.length,
                     itemBuilder: (context, index) {
                       final conversation = convState.conversations[index];
-
-                      // Look how clean this is! No if/else logic here.
                       return _buildConversationTile(conversation);
                     },
                   ),
@@ -234,8 +229,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ],
         ),
         title: Text(conv.otherUserName, style: AppTheme.nameStyle),
+        // ✅ UPDATED: Use the helper that checks for deleted messages first
         subtitle: _buildLastMessagePreview(conv),
-
         onTap: () => _joinChat(conv),
       ),
     );
@@ -243,39 +238,53 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   // ✅ NEW: Helper to format the last message preview
   Widget _buildLastMessagePreview(Conversation conv) {
-    // Check for Cloudinary patterns or file extensions
-    // Note: Cloudinary often treats audio as "video" resource_type
+    // 1. Check for DELETED message first (Priority 1)
+    if (conv.lastMessageIsDeleted) {
+      return Row(
+        children: [
+          const Icon(Icons.block, size: 16, color: Colors.grey),
+          const SizedBox(width: 4),
+          const Text(
+            "This message was deleted",
+            style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic),
+          ),
+        ],
+      );
+    }
+
+    // 2. Check for Voice Message
     final bool isAudio =
         conv.lastMessage.contains('/video/upload/') ||
         conv.lastMessage.endsWith('.m4a') ||
         conv.lastMessage.endsWith('.mp3');
 
-    final bool isImage =
-        conv.lastMessage.contains('/image/upload/') ||
-        conv.lastMessage.endsWith('.jpg') ||
-        conv.lastMessage.endsWith('.png');
-
     if (isAudio) {
       return Row(
         children: [
-          Icon(Icons.mic, size: 16, color: AppTheme.primary),
+          const Icon(Icons.mic, size: 16, color: AppTheme.primary),
           const SizedBox(width: 4),
           const Text("Voice Message", style: TextStyle(color: Colors.grey)),
         ],
       );
     }
 
+    // 3. Check for Photo
+    final bool isImage =
+        conv.lastMessage.contains('/image/upload/') ||
+        conv.lastMessage.endsWith('.jpg') ||
+        conv.lastMessage.endsWith('.png');
+
     if (isImage) {
       return Row(
         children: [
-          Icon(Icons.photo, size: 16, color: AppTheme.primary),
+          const Icon(Icons.photo, size: 16, color: AppTheme.primary),
           const SizedBox(width: 4),
           const Text("Photo", style: TextStyle(color: Colors.grey)),
         ],
       );
     }
 
-    // Default Text Message
+    // 4. Default Text Message
     return Text(
       conv.lastMessage,
       maxLines: 1,

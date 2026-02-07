@@ -5,6 +5,7 @@ class Conversation {
   final String? otherUserAvatar;
   final bool isOnline;
   final String lastMessage;
+  final bool lastMessageIsDeleted; // ✅ 1. Add Field
   final DateTime? updatedAt;
   final int unreadCount;
 
@@ -15,6 +16,7 @@ class Conversation {
     this.otherUserAvatar,
     this.isOnline = false,
     required this.lastMessage,
+    this.lastMessageIsDeleted = false, // ✅ 2. Default to false
     this.updatedAt,
     this.unreadCount = 0,
   });
@@ -29,6 +31,7 @@ class Conversation {
       otherUserAvatar: otherUser['profile_pic'],
       isOnline: otherUser['is_online'] == true,
       lastMessage: json['lastMessage'] ?? 'Start chatting',
+      lastMessageIsDeleted: json['lastMessageIsDeleted'] ?? false,
       updatedAt: json['updatedAt'] != null
           ? DateTime.tryParse(json['updatedAt'])
           : null,
@@ -48,7 +51,12 @@ class Conversation {
   }
 
   // Helper: Create a copy with updated status (Optimization for immutability)
-  Conversation copyWith({bool? isOnline, String? lastMessage, DateTime? time}) {
+  Conversation copyWith({
+    bool? isOnline,
+    String? lastMessage,
+    bool? lastMessageIsDeleted,
+    DateTime? time,
+  }) {
     return Conversation(
       id: id,
       otherUserId: otherUserId,

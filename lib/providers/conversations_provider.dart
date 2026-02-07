@@ -131,8 +131,9 @@ class ConversationsNotifier extends Notifier<ConversationState> {
         );
       } else {
         // New incoming chat (from someone else)
-        if (senderId == myId)
+        if (senderId == myId) {
           return; // Should have been handled above, but double check
+        }
 
         updatedConv = Conversation(
           id: roomId,
