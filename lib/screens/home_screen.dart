@@ -110,41 +110,53 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       backgroundColor: AppTheme.background,
       appBar: AppBar(
         title: const Text("Messages", style: AppTheme.headerStyle),
-        backgroundColor: Colors.white,
+        backgroundColor: AppTheme.background,
         elevation: 0,
+        iconTheme: const IconThemeData(color: AppTheme.textPrimary),
         actions: [
           IconButton(
-            icon: const Icon(Icons.person, color: Colors.black),
+            icon: const Icon(Icons.person_outline, color: AppTheme.textPrimary, size: 28),
             onPressed: () => Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const ProfileScreen()),
             ),
           ),
           IconButton(
-            icon: const Icon(Icons.logout, color: Colors.red),
+            icon: const Icon(Icons.logout_rounded, color: Colors.redAccent, size: 26),
             onPressed: _handleLogout,
           ),
+          const SizedBox(width: 8),
         ],
       ),
       body: Column(
         children: [
           // 1. CLEAN SEARCH BAR
           Container(
-            padding: const EdgeInsets.all(16.0),
-            color: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 12.0),
+            color: AppTheme.background,
             child: TextField(
               controller: _searchController,
-              // Delegate logic to Provider
               onChanged: (val) =>
                   ref.read(conversationsProvider.notifier).searchUsers(val),
+              style: const TextStyle(color: AppTheme.textPrimary),
               decoration: InputDecoration(
-                hintText: "Search users...",
-                prefixIcon: const Icon(Icons.search, color: Colors.grey),
+                hintText: "Search conversations...",
+                hintStyle: const TextStyle(color: AppTheme.textSecondary),
+                prefixIcon: const Icon(Icons.search, color: AppTheme.textSecondary),
                 filled: true,
-                fillColor: Colors.grey[100],
+                fillColor: AppTheme.cardColor,
+                contentPadding: const EdgeInsets.symmetric(vertical: 0),
                 border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(30),
-                  borderSide: BorderSide.none,
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: Color(0xFFE2E8F0), width: 1),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: Color(0xFFE2E8F0), width: 1),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: AppTheme.primary, width: 1.5),
                 ),
               ),
             ),
@@ -172,17 +184,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   // Separate Widget for cleaner code
   Widget _buildConversationTile(Conversation conv) {
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppTheme.cardColor,
         borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        border: Border.all(color: const Color(0xFFE2E8F0), width: 1),
       ),
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),

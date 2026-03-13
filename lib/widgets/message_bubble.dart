@@ -77,19 +77,20 @@ class MessageBubble extends StatelessWidget {
                   ),
                   padding: const EdgeInsets.symmetric(
                     horizontal: 16,
-                    vertical: 10,
+                    vertical: 12,
                   ),
                   decoration: BoxDecoration(
-                    color: isMe ? AppTheme.primary : Colors.grey[200],
+                    color: isMe ? AppTheme.myMessageColor : AppTheme.otherMessageColor,
+                    border: isMe ? null : Border.all(color: const Color(0xFFE2E8F0), width: 1),
                     borderRadius: BorderRadius.only(
-                      topLeft: const Radius.circular(20),
-                      topRight: const Radius.circular(20),
+                      topLeft: const Radius.circular(16),
+                      topRight: const Radius.circular(16),
                       bottomLeft: isMe
-                          ? const Radius.circular(20)
-                          : Radius.zero,
+                          ? const Radius.circular(16)
+                          : const Radius.circular(4),
                       bottomRight: isMe
-                          ? Radius.zero
-                          : const Radius.circular(20),
+                          ? const Radius.circular(4)
+                          : const Radius.circular(16),
                     ),
                   ),
                   // ✅ UPDATED LOGIC HERE
@@ -156,8 +157,9 @@ class MessageBubble extends StatelessWidget {
                       : Text(
                           text,
                           style: TextStyle(
-                            color: isMe ? Colors.white : Colors.black87,
+                            color: isMe ? Colors.white : AppTheme.textPrimary,
                             fontSize: 15,
+                            height: 1.4,
                           ),
                         ),
                 ),

@@ -113,11 +113,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 1,
+        backgroundColor: AppTheme.background,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: AppTheme.textPrimary),
         leading: widget.isDesktop
             ? const SizedBox()
-            : const BackButton(color: Colors.black),
+            : const BackButton(),
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -125,13 +126,21 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             if (chatState.isTyping)
               Text(
                 "${chatState.typingUser ?? 'Someone'} is typing...",
-                style: TextStyle(
+                style: const TextStyle(
                   color: AppTheme.primary,
                   fontSize: 12,
                   fontStyle: FontStyle.italic,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
           ],
+        ),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1.0),
+          child: Container(
+            color: const Color(0xFFE2E8F0),
+            height: 1.0,
+          ),
         ),
       ),
       body: Column(
@@ -201,106 +210,103 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           ),
 
           // --- Input Area ---
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 10,
-                  offset: const Offset(0, -5),
-                ),
-              ],
-            ),
-            child: Row(
-              children: [
-                // Photo Button
-                IconButton(
-                  icon: chatState.isUploading
-                      ? const SizedBox(
-                          width: 24,
-                          height: 24,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : Icon(
-                          Icons.add_photo_alternate_rounded,
-                          color: Colors.grey[600],
-                        ),
-                  onPressed: chatState.isUploading
-                      ? null
-                      : () => ref.read(chatProvider.notifier).sendImage(),
-                ),
-                const SizedBox(width: 8),
+          SafeArea(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: AppTheme.background,
+                border: Border(top: BorderSide(color: const Color(0xFFE2E8F0), width: 1)),
+              ),
+              child: Row(
+                children: [
+                  // Photo Button
+                  IconButton(
+                    icon: chatState.isUploading
+                        ? const SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : Icon(
+                            Icons.add_photo_alternate_rounded,
+                            color: Colors.grey[600],
+                          ),
+                    onPressed: chatState.isUploading
+                        ? null
+                        : () => ref.read(chatProvider.notifier).sendImage(),
+                  ),
+                  const SizedBox(width: 8),
 
-                // Text Field
-                Expanded(
-                  child: TextField(
-                    controller: _messageController,
-                    onChanged: (text) {
-                      setState(() {}); // Toggle Mic/Send button
-                      ref.read(chatProvider.notifier).sendTypingEvent(text);
-                    },
-                    onSubmitted: (_) => _handleSend(),
-                    decoration: InputDecoration(
-                      hintText: "Type a message...",
-                      filled: true,
-                      fillColor: AppTheme.background,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 20,
-                        vertical: 12,
-                      ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(24),
-                        borderSide: BorderSide.none,
+                  // Text Field
+                  Expanded(
+                    child: TextField(
+                      controller: _messageController,
+                      onChanged: (text) {
+                        setState(() {}); // Toggle Mic/Send button
+                        ref.read(chatProvider.notifier).sendTypingEvent(text);
+                      },
+                      onSubmitted: (_) => _handleSend(),
+                      decoration: InputDecoration(
+                        hintText: "Type a message...",
+                        hintStyle: TextStyle(color: AppTheme.textSecondary),
+                        filled: true,
+                        fillColor: AppTheme.cardColor,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 20,
+                          vertical: 12,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(24),
+                          borderSide: const BorderSide(color: Color(0xFFE2E8F0), width: 1),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(24),
+                          borderSide: const BorderSide(color: Color(0xFFE2E8F0), width: 1),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(24),
+                          borderSide: BorderSide(color: AppTheme.primary, width: 1.5),
+                        ),
                       ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 12),
+                  const SizedBox(width: 12),
 
-                // Mic or Send Button
-                _messageController.text.trim().isEmpty
-                    ? GestureDetector(
-                        onLongPressStart: (_) => _startRecording(),
-                        onLongPressEnd: (_) => _stopAndSendRecording(),
-                        child: Container(
-                          padding: const EdgeInsets.all(12),
+                  // Mic or Send Button
+                  _messageController.text.trim().isEmpty
+                      ? GestureDetector(
+                          onLongPressStart: (_) => _startRecording(),
+                          onLongPressEnd: (_) => _stopAndSendRecording(),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: _isRecording ? Colors.redAccent : AppTheme.primary,
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              _isRecording ? Icons.mic : Icons.mic_none,
+                              color: Colors.white,
+                              size: 20,
+                            ),
+                          ),
+                        )
+                      : Container(
                           decoration: BoxDecoration(
-                            color: _isRecording ? Colors.red : AppTheme.primary,
+                            color: AppTheme.primary,
                             shape: BoxShape.circle,
-                            boxShadow: _isRecording
-                                ? [
-                                    BoxShadow(
-                                      color: Colors.red.withOpacity(0.5),
-                                      blurRadius: 10,
-                                      spreadRadius: 2,
-                                    ),
-                                  ]
-                                : null,
                           ),
-                          child: Icon(
-                            _isRecording ? Icons.mic : Icons.mic_none,
-                            color: Colors.white,
-                            size: 20,
+                          child: IconButton(
+                            icon: const Icon(
+                              Icons.send_rounded,
+                              color: Colors.white,
+                              size: 20,
+                            ),
+                            onPressed: _handleSend,
                           ),
                         ),
-                      )
-                    : Container(
-                        decoration: const BoxDecoration(
-                          color: AppTheme.primary,
-                          shape: BoxShape.circle,
-                        ),
-                        child: IconButton(
-                          icon: const Icon(
-                            Icons.send_rounded,
-                            color: Colors.white,
-                            size: 20,
-                          ),
-                          onPressed: _handleSend,
-                        ),
-                      ),
-              ],
+                ],
+              ),
             ),
           ),
         ],
