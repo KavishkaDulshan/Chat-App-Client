@@ -35,53 +35,9 @@ The project leverages a modern, decoupled architecture using the following techn
 
 ---
 
-## System Architecture & Connectivity Flow
+## System Architecture
 
 The system is highly modular. The Flutter client communicates with the Node.js backend via two distinct channels: **REST APIs** for standard operations (authentication, profile updates, fetching history) and **WebSockets** for real-time bidirectional messaging. The backend interfaces with a containerized MongoDB instance to persist data.
-
-### Architecture Flow Diagram
-
-```mermaid
-graph TD
-    subgraph Client [Flutter Application]
-        UI[User Interface]
-        State[Riverpod State]
-        Storage[Secure Storage]
-        FCM_Client[Firebase Messaging SDK]
-    end
-
-    subgraph Azure_VM [Azure Virtual Machine - Dockerized]
-        API[Express REST API]
-        SocketServer[Socket.io Server]
-        DB[(MongoDB)]
-    end
-
-    subgraph External_Services [Third-Party Services]
-        FCM_Server[Firebase Admin SDK]
-        Cloudinary[Cloudinary Image CDN]
-        SMTP[SMTP Email / Nodemailer]
-    end
-
-    %% Client to Backend HTTP
-    UI -->|HTTP POST /login, /verify-otp| API
-    API -->|Issues JWT| Storage
-  
-    %% Client to Backend Socket
-    State -->|ws:// with JWT| SocketServer
-    SocketServer <-->|Emits / Listens| UI
-  
-    %% Backend to DB
-    API <-->|Read/Write| DB
-    SocketServer <-->|Store Messages / Read History| DB
-  
-    %% External Integrations
-    API -->|Send OTP| SMTP
-    API -->|Upload Avatars| Cloudinary
-  
-    %% Push Notifications
-    SocketServer -->|Trigger Notification| FCM_Server
-    FCM_Server -->|Push Alert| FCM_Client
-    FCM_Client -->|Wake / Notify| UI
 
 ### Component Integration Details
 
