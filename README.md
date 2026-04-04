@@ -1,4 +1,3 @@
-```
 # BlinkChat: Real-Time Encrypted Cross-Platform Messaging App
 
 ## Overview
@@ -83,7 +82,6 @@ graph TD
     SocketServer -->|Trigger Notification| FCM_Server
     FCM_Server -->|Push Alert| FCM_Client
     FCM_Client -->|Wake / Notify| UI
-```
 
 ### Component Integration Details
 
