@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart'; // <--- USE THIS, NOT dart:io
 
 class AppConfig {
-  static const bool isProduction = true;
+  static const bool isProduction = false;
   static const String productionUrl =
       'https://blinkchat.uaenorth.cloudapp.azure.com';
 
