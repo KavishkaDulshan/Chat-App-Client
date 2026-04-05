@@ -85,9 +85,9 @@ Security is a foundational pillar of this application. It is implemented across 
 
 WebSockets can bypass standard HTTP middleware. To secure real-time data, a custom `socketAuth` middleware intercepts the Socket.io handshake, decoding and verifying the JWT before allowing the connection to join private chat rooms.
 
-### Data Encryption at Rest
+### Data Encryption (E2E)
 
-Messages are not stored in plain text. Before saving a payload to MongoDB, the backend passes the text through a custom `crypto.js` utility, ensuring that message contents remain encrypted within the database (`encrypt` on save, `decrypt` on fetch).
+Messages are not stored in plain text. All the messages are end to end encrypted and they are stoged in the databaase as encrypted. This ensure the fully secure and complete privacy of teh user.
 
 ### Client-Side Security
 
