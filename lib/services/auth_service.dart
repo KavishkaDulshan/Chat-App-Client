@@ -195,6 +195,56 @@ class AuthService {
     }
   }
 
+  Future<bool> uploadE2EEPublicKey(
+    String publicKey, {
+    int keyVersion = 1,
+  }) async {
+    try {
+      final jwtToken = await storage.read(key: 'jwt_token');
+      if (jwtToken == null) return false;
+
+      final response = await http.put(
+        Uri.parse('$baseUrl/e2e-key'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $jwtToken',
+        },
+        body: jsonEncode({'publicKey': publicKey, 'keyVersion': keyVersion}),
+      );
+
+      return response.statusCode == 200;
+    } catch (e) {
+      print('Upload E2EE Key Error: $e');
+      return false;
+    }
+  }
+
+  Future<String?> getUserE2EEPublicKey(String userId) async {
+    try {
+      final jwtToken = await storage.read(key: 'jwt_token');
+      if (jwtToken == null) return null;
+
+      final response = await http.get(
+        Uri.parse('$baseUrl/users/$userId/e2e-key'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $jwtToken',
+        },
+      );
+
+      if (response.statusCode != 200) return null;
+      final data = jsonDecode(response.body);
+      final key = data['e2e_public_key'];
+      if (key is String && key.isNotEmpty) {
+        return key;
+      }
+      return null;
+    } catch (e) {
+      print('Fetch Peer E2EE Key Error: $e');
+      return null;
+    }
+  }
+
   // Add this inside AuthService class
   Future<User?> updateProfilePic(String userId, String imageUrl) async {
     try {

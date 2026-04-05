@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/user_model.dart';
 import '../services/auth_service.dart';
+import '../services/e2ee_service.dart';
 import '../providers/socket_provider.dart'; // Import Socket Provider
 
 class AuthState {
@@ -16,6 +17,17 @@ final authProvider = NotifierProvider<AuthController, AuthState>(
 );
 
 class AuthController extends Notifier<AuthState> {
+  Future<void> _bootstrapE2EE(User user) async {
+    try {
+      final e2eeService = ref.read(e2eeServiceProvider);
+      final authService = ref.read(authServiceProvider);
+      final publicKey = await e2eeService.ensureIdentityKeyForUser(user.id);
+      await authService.uploadE2EEPublicKey(publicKey);
+    } catch (e) {
+      print('E2EE Bootstrap Warning: $e');
+    }
+  }
+
   @override
   AuthState build() {
     return AuthState(isLoading: true);
@@ -35,6 +47,7 @@ class AuthController extends Notifier<AuthState> {
     final user = await authService.tryAutoLogin();
 
     if (user != null) {
+      await _bootstrapE2EE(user);
       // FIX: Connect socket immediately after restoring user
       _connectSocket(user);
       state = AuthState(user: user, isLoading: false);
@@ -49,6 +62,7 @@ class AuthController extends Notifier<AuthState> {
     final user = await authService.login(email, password);
 
     if (user != null) {
+      await _bootstrapE2EE(user);
       // FIX: Connect socket after manual login
       _connectSocket(user);
       state = AuthState(user: user, isLoading: false);
@@ -90,6 +104,7 @@ class AuthController extends Notifier<AuthState> {
     final user = await authService.verifyOTP(email, otp);
 
     if (user != null) {
+      await _bootstrapE2EE(user);
       _connectSocket(user);
       state = AuthState(user: user, isLoading: false);
       return true;

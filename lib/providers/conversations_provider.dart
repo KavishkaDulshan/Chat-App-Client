@@ -25,6 +25,10 @@ final conversationsProvider =
 class ConversationsNotifier extends Notifier<ConversationState> {
   bool _isListening = false;
 
+  bool _isE2EMessage(String? content) {
+    return content != null && content.startsWith('e2e:v1:');
+  }
+
   @override
   ConversationState build() {
     return ConversationState();
@@ -85,7 +89,10 @@ class ConversationsNotifier extends Notifier<ConversationState> {
 
       final senderId = data['sender_id'].toString();
       final roomId = data['roomId'].toString();
-      final content = data['content'] ?? "Sent a message";
+      final rawContent = (data['content'] ?? "Sent a message").toString();
+      final content = _isE2EMessage(rawContent)
+          ? 'Encrypted message'
+          : rawContent;
 
       // Create a modifiable copy
       final List<Conversation> currentList = List.from(state.conversations);

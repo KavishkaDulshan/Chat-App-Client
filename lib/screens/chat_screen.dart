@@ -88,11 +88,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     }
   }
 
-  void _handleSend() {
+  Future<void> _handleSend() async {
     final text = _messageController.text.trim();
     if (text.isEmpty) return;
 
-    ref.read(chatProvider.notifier).sendMessage(text);
+    await ref.read(chatProvider.notifier).sendMessage(text);
     _messageController.clear();
     setState(() {}); // Refresh UI (toggle Mic/Send button)
     Future.delayed(const Duration(milliseconds: 100), _scrollToBottom);
@@ -116,9 +116,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         backgroundColor: AppTheme.background,
         elevation: 0,
         iconTheme: const IconThemeData(color: AppTheme.textPrimary),
-        leading: widget.isDesktop
-            ? const SizedBox()
-            : const BackButton(),
+        leading: widget.isDesktop ? const SizedBox() : const BackButton(),
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -137,10 +135,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         ),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1.0),
-          child: Container(
-            color: const Color(0xFFE2E8F0),
-            height: 1.0,
-          ),
+          child: Container(color: const Color(0xFFE2E8F0), height: 1.0),
         ),
       ),
       body: Column(
@@ -215,7 +210,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
                 color: AppTheme.background,
-                border: Border(top: BorderSide(color: const Color(0xFFE2E8F0), width: 1)),
+                border: Border(
+                  top: BorderSide(color: const Color(0xFFE2E8F0), width: 1),
+                ),
               ),
               child: Row(
                 children: [
@@ -245,7 +242,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                         setState(() {}); // Toggle Mic/Send button
                         ref.read(chatProvider.notifier).sendTypingEvent(text);
                       },
-                      onSubmitted: (_) => _handleSend(),
+                      onSubmitted: (_) {
+                        _handleSend();
+                      },
                       decoration: InputDecoration(
                         hintText: "Type a message...",
                         hintStyle: TextStyle(color: AppTheme.textSecondary),
@@ -257,15 +256,24 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                         ),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(24),
-                          borderSide: const BorderSide(color: Color(0xFFE2E8F0), width: 1),
+                          borderSide: const BorderSide(
+                            color: Color(0xFFE2E8F0),
+                            width: 1,
+                          ),
                         ),
                         enabledBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(24),
-                          borderSide: const BorderSide(color: Color(0xFFE2E8F0), width: 1),
+                          borderSide: const BorderSide(
+                            color: Color(0xFFE2E8F0),
+                            width: 1,
+                          ),
                         ),
                         focusedBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(24),
-                          borderSide: BorderSide(color: AppTheme.primary, width: 1.5),
+                          borderSide: BorderSide(
+                            color: AppTheme.primary,
+                            width: 1.5,
+                          ),
                         ),
                       ),
                     ),
@@ -281,7 +289,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                             duration: const Duration(milliseconds: 200),
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
-                              color: _isRecording ? Colors.redAccent : AppTheme.primary,
+                              color: _isRecording
+                                  ? Colors.redAccent
+                                  : AppTheme.primary,
                               shape: BoxShape.circle,
                             ),
                             child: Icon(
@@ -302,7 +312,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                               color: Colors.white,
                               size: 20,
                             ),
-                            onPressed: _handleSend,
+                            onPressed: () {
+                              _handleSend();
+                            },
                           ),
                         ),
                 ],

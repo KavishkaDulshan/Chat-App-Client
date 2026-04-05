@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/auth_provider.dart';
 import '../providers/conversations_provider.dart'; // Import the new provider
-import '../providers/socket_provider.dart';
 import 'chat_screen.dart';
 import '../app_theme.dart';
 import '../models/conversation.dart'; // Import the unified model
@@ -115,14 +114,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         iconTheme: const IconThemeData(color: AppTheme.textPrimary),
         actions: [
           IconButton(
-            icon: const Icon(Icons.person_outline, color: AppTheme.textPrimary, size: 28),
+            icon: const Icon(
+              Icons.person_outline,
+              color: AppTheme.textPrimary,
+              size: 28,
+            ),
             onPressed: () => Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const ProfileScreen()),
             ),
           ),
           IconButton(
-            icon: const Icon(Icons.logout_rounded, color: Colors.redAccent, size: 26),
+            icon: const Icon(
+              Icons.logout_rounded,
+              color: Colors.redAccent,
+              size: 26,
+            ),
             onPressed: _handleLogout,
           ),
           const SizedBox(width: 8),
@@ -132,7 +139,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         children: [
           // 1. CLEAN SEARCH BAR
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 12.0),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 20.0,
+              vertical: 12.0,
+            ),
             color: AppTheme.background,
             child: TextField(
               controller: _searchController,
@@ -142,21 +152,33 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               decoration: InputDecoration(
                 hintText: "Search conversations...",
                 hintStyle: const TextStyle(color: AppTheme.textSecondary),
-                prefixIcon: const Icon(Icons.search, color: AppTheme.textSecondary),
+                prefixIcon: const Icon(
+                  Icons.search,
+                  color: AppTheme.textSecondary,
+                ),
                 filled: true,
                 fillColor: AppTheme.cardColor,
                 contentPadding: const EdgeInsets.symmetric(vertical: 0),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: Color(0xFFE2E8F0), width: 1),
+                  borderSide: const BorderSide(
+                    color: Color(0xFFE2E8F0),
+                    width: 1,
+                  ),
                 ),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: Color(0xFFE2E8F0), width: 1),
+                  borderSide: const BorderSide(
+                    color: Color(0xFFE2E8F0),
+                    width: 1,
+                  ),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: AppTheme.primary, width: 1.5),
+                  borderSide: const BorderSide(
+                    color: AppTheme.primary,
+                    width: 1.5,
+                  ),
                 ),
               ),
             ),
@@ -285,6 +307,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           const Icon(Icons.photo, size: 16, color: AppTheme.primary),
           const SizedBox(width: 4),
           const Text("Photo", style: TextStyle(color: Colors.grey)),
+        ],
+      );
+    }
+
+    if (conv.lastMessage == 'Encrypted message') {
+      return Row(
+        children: const [
+          Icon(Icons.lock, size: 16, color: AppTheme.primary),
+          SizedBox(width: 4),
+          Text('Encrypted message', style: TextStyle(color: Colors.grey)),
         ],
       );
     }
