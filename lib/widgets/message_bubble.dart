@@ -71,30 +71,42 @@ class MessageBubble extends StatelessWidget {
                   ),
 
                 // The Bubble
-                Container(
-                  constraints: BoxConstraints(
-                    maxWidth: MediaQuery.of(context).size.width * 0.75,
+                ClipRRect(
+                  borderRadius: BorderRadius.only(
+                    topLeft: const Radius.circular(16),
+                    topRight: const Radius.circular(16),
+                    bottomLeft: isMe
+                        ? const Radius.circular(16)
+                        : const Radius.circular(4),
+                    bottomRight: isMe
+                        ? const Radius.circular(4)
+                        : const Radius.circular(16),
                   ),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 12,
-                  ),
-                  decoration: BoxDecoration(
-                    color: isMe ? AppTheme.myMessageColor : AppTheme.otherMessageColor,
-                    border: isMe ? null : Border.all(color: const Color(0xFFE2E8F0), width: 1),
-                    borderRadius: BorderRadius.only(
-                      topLeft: const Radius.circular(16),
-                      topRight: const Radius.circular(16),
-                      bottomLeft: isMe
-                          ? const Radius.circular(16)
-                          : const Radius.circular(4),
-                      bottomRight: isMe
-                          ? const Radius.circular(4)
-                          : const Radius.circular(16),
+                  child: Container(
+                    constraints: BoxConstraints(
+                      maxWidth: MediaQuery.of(context).size.width * 0.75,
+                      maxHeight: MediaQuery.of(context).size.height * 0.6,
                     ),
-                  ),
-                  // ✅ UPDATED LOGIC HERE
-                  child: type == 'image'
+                    padding: type == 'image' ? EdgeInsets.zero : const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
+                    decoration: BoxDecoration(
+                      color: isMe ? AppTheme.myMessageColor : AppTheme.otherMessageColor,
+                      border: isMe ? null : Border.all(color: const Color(0xFFE2E8F0), width: 1),
+                      borderRadius: BorderRadius.only(
+                        topLeft: const Radius.circular(16),
+                        topRight: const Radius.circular(16),
+                        bottomLeft: isMe
+                            ? const Radius.circular(16)
+                            : const Radius.circular(4),
+                        bottomRight: isMe
+                            ? const Radius.circular(4)
+                            : const Radius.circular(16),
+                      ),
+                    ),
+                    // ✅ UPDATED LOGIC HERE
+                    child: type == 'image'
                       ? GestureDetector(
                           onTap: () {
                             Navigator.push(
@@ -108,13 +120,14 @@ class MessageBubble extends StatelessWidget {
                             borderRadius: BorderRadius.circular(12),
                             child: Image.network(
                               text,
-                              height: 200,
-                              width: double.infinity,
-                              fit: BoxFit.cover,
+                              fit: BoxFit.contain,
                               loadingBuilder: (ctx, child, loadingProgress) {
                                 if (loadingProgress == null) return child;
-                                return SizedBox(
-                                  height: 200,
+                                return Container(
+                                  constraints: const BoxConstraints(
+                                    minHeight: 150,
+                                    minWidth: 150,
+                                  ),
                                   child: Center(
                                     child: CircularProgressIndicator(
                                       value:
@@ -133,11 +146,15 @@ class MessageBubble extends StatelessWidget {
                                 );
                               },
                               errorBuilder: (context, error, stackTrace) {
-                                return const SizedBox(
-                                  height: 200,
-                                  child: Center(
+                                return Container(
+                                  constraints: const BoxConstraints(
+                                    minHeight: 150,
+                                    minWidth: 150,
+                                  ),
+                                  child: const Center(
                                     child: Icon(
                                       Icons.broken_image,
+                                      size: 40,
                                       color: Colors.white,
                                     ),
                                   ),
@@ -146,22 +163,34 @@ class MessageBubble extends StatelessWidget {
                             ),
                           ),
                         )
-                      : type ==
-                            'audio' // ✅ Check for Audio
-                      ? AudioBubble(
-                          url: text, // 'text' field contains the Audio URL
-                          isMe: isMe,
-                          // If you update your DB to store duration, pass it here:
-                          // duration: duration,
+                      : type == 'audio' // ✅ Check for Audio
+                      ? Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
+                          child: AudioBubble(
+                            url: text, // 'text' field contains the Audio URL
+                            isMe: isMe,
+                            // If you update your DB to store duration, pass it here:
+                            // duration: duration,
+                          ),
                         )
-                      : Text(
-                          text,
-                          style: TextStyle(
-                            color: isMe ? Colors.white : AppTheme.textPrimary,
-                            fontSize: 15,
-                            height: 1.4,
+                      : Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
+                          child: Text(
+                            text,
+                            style: TextStyle(
+                              color: isMe ? Colors.white : AppTheme.textPrimary,
+                              fontSize: 15,
+                              height: 1.4,
+                            ),
                           ),
                         ),
+                ),
                 ),
 
                 // Time & Status
