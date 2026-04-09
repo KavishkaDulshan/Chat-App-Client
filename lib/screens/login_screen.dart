@@ -45,7 +45,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         // 2. We navigate to the Verification Screen.
         Navigator.of(context).push(
           MaterialPageRoute(
-            builder: (context) => OtpVerificationScreen(email: email),
+            builder: (context) => OtpVerificationScreen(email: email, password: password),
           ),
         );
 

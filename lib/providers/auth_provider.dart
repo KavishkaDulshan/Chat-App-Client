@@ -17,25 +17,39 @@ final authProvider = NotifierProvider<AuthController, AuthState>(
 );
 
 class AuthController extends Notifier<AuthState> {
-  Future<void> _bootstrapE2EE(User user) async {
+  Future<void> _bootstrapE2EE(User user, {String? password}) async {
     try {
       final e2eeService = ref.read(e2eeServiceProvider);
       final authService = ref.read(authServiceProvider);
 
+      // Derive or retrieve the AES lookup key for E2E backup
+      final backupKeyB64 = await e2eeService.getOrDeriveBackupKey(
+        password: password,
+        salt: user.email,
+      );
+
       // ensureIdentityKeyForUser will:
       //   1. Use local keys if available
-      //   2. Restore from server if local keys are missing
+      //   2. Restore from server (decrypting if backupKeyB64 is provided)
       //   3. Generate new keys only as a last resort
       final publicKey = await e2eeService.ensureIdentityKeyForUser(
         user.id,
         serverKeyFetcher: () => authService.fetchMyE2EEKeyPair(),
+        backupKeyB64: backupKeyB64,
       );
 
-      // Upload both keys so the server always has a backup for key restoration.
-      final privateKey = await e2eeService.getMyPrivateKey();
+      // We must encrypt the private key before upload
+      String? privateKeyToUpload = await e2eeService.getMyPrivateKey();
+      if (privateKeyToUpload != null && backupKeyB64 != null) {
+        final encryptedPriv = await e2eeService.encryptPrivateKeyBackup(privateKeyToUpload, backupKeyB64);
+        if (encryptedPriv != null) {
+          privateKeyToUpload = encryptedPriv;
+        }
+      }
+
       await authService.uploadE2EEPublicKey(
         publicKey,
-        privateKey: privateKey,
+        privateKey: privateKeyToUpload,
       );
     } catch (e) {
       print('E2EE Bootstrap Warning: $e');
@@ -61,8 +75,8 @@ class AuthController extends Notifier<AuthState> {
     final user = await authService.tryAutoLogin();
 
     if (user != null) {
+      // Auto-login does not have the password, so backupKey is fetched from secure storage
       await _bootstrapE2EE(user);
-      // FIX: Connect socket immediately after restoring user
       _connectSocket(user);
       state = AuthState(user: user, isLoading: false);
     } else {
@@ -76,8 +90,8 @@ class AuthController extends Notifier<AuthState> {
     final user = await authService.login(email, password);
 
     if (user != null) {
-      await _bootstrapE2EE(user);
-      // FIX: Connect socket after manual login
+      // Pass the password to bootstrap so we can derive the key
+      await _bootstrapE2EE(user, password: password);
       _connectSocket(user);
       state = AuthState(user: user, isLoading: false);
     } else {
@@ -111,14 +125,15 @@ class AuthController extends Notifier<AuthState> {
     }
   }
 
-  Future<bool> verifyOTP(String email, String otp) async {
+  Future<bool> verifyOTP(String email, String otp, String password) async {
     state = AuthState(isLoading: true);
     final authService = ref.read(authServiceProvider);
 
     final user = await authService.verifyOTP(email, otp);
 
     if (user != null) {
-      await _bootstrapE2EE(user);
+      // Pass the password to bootstrap so we can derive the key
+      await _bootstrapE2EE(user, password: password);
       _connectSocket(user);
       state = AuthState(user: user, isLoading: false);
       return true;

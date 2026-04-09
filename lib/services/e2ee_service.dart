@@ -13,11 +13,84 @@ class E2eeService {
   static const _keyOwnerStorageKey = 'e2e_key_owner_user_id';
   static const _protocolInfo = 'blinkchat-e2ee-v1';
 
+  static const _backupKeyStorageKey = 'e2e_backup_key_b64';
+
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
   final X25519 _x25519 = X25519();
   final AesGcm _aesGcm = AesGcm.with256bits();
   final Hkdf _hkdf = Hkdf(hmac: Hmac.sha256(), outputLength: 32);
   final Random _random = Random.secure();
+
+  /// Derives or retrieves the client-side AES key used to encrypt the private key
+  /// before it is backed up to the server.
+  Future<String?> getOrDeriveBackupKey({String? password, String? salt}) async {
+    // 1. Try secure storage first
+    final existing = await _storage.read(key: _backupKeyStorageKey);
+    if (existing != null && existing.isNotEmpty) {
+      return existing;
+    }
+
+    // 2. If we have credentials (during manual login/registration), derive key
+    if (password != null && password.isNotEmpty && salt != null && salt.isNotEmpty) {
+      final pbkdf2 = Pbkdf2(
+        macAlgorithm: Hmac.sha256(),
+        iterations: 100000,
+        bits: 256,
+      );
+      final secretKey = await pbkdf2.deriveKey(
+        secretKey: SecretKey(utf8.encode(password)),
+        nonce: utf8.encode(salt),
+      );
+      final bytes = await secretKey.extractBytes();
+      final backupB64 = base64Encode(bytes);
+      await _storage.write(key: _backupKeyStorageKey, value: backupB64);
+      return backupB64;
+    }
+
+    return null;
+  }
+
+  Future<String?> encryptPrivateKeyBackup(String rawPrivateKeyB64, String backupKeyB64) async {
+    try {
+      final secretKey = SecretKey(base64Decode(backupKeyB64));
+      final nonce = List<int>.generate(12, (_) => _random.nextInt(256));
+      final secretBox = await _aesGcm.encrypt(
+        utf8.encode(rawPrivateKeyB64),
+        secretKey: secretKey,
+        nonce: nonce,
+      );
+      final payload = {
+        'v': 1,
+        'n': base64Encode(secretBox.nonce),
+        'c': base64Encode(secretBox.cipherText),
+        't': base64Encode(secretBox.mac.bytes),
+      };
+      return 'aes-gcm:v1:' + base64Encode(utf8.encode(jsonEncode(payload)));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<String?> decryptPrivateKeyBackup(String encryptedPayload, String backupKeyB64) async {
+    try {
+      if (!encryptedPayload.startsWith('aes-gcm:v1:')) return encryptedPayload;
+      final encodedPart = encryptedPayload.substring('aes-gcm:v1:'.length);
+      final decoded = utf8.decode(base64Decode(encodedPart));
+      final map = jsonDecode(decoded);
+      if (map is! Map<String, dynamic> || map['v'] != 1) return null;
+
+      final nonce = base64Decode(map['n'] as String);
+      final cipherText = base64Decode(map['c'] as String);
+      final tag = base64Decode(map['t'] as String);
+
+      final secretKey = SecretKey(base64Decode(backupKeyB64));
+      final secretBox = SecretBox(cipherText, nonce: nonce, mac: Mac(tag));
+      final clearBytes = await _aesGcm.decrypt(secretBox, secretKey: secretKey);
+      return utf8.decode(clearBytes);
+    } catch (_) {
+      return null;
+    }
+  }
 
   /// Ensures a stable key pair exists for [userId].
   ///
@@ -30,6 +103,7 @@ class E2eeService {
   Future<String> ensureIdentityKeyForUser(
     String userId, {
     Future<Map<String, dynamic>?> Function()? serverKeyFetcher,
+    String? backupKeyB64,
   }) async {
     // If the stored keys belong to a different user, clear them.
     final ownerUserId = await _storage.read(key: _keyOwnerStorageKey);
@@ -62,12 +136,26 @@ class E2eeService {
               serverPub.isNotEmpty &&
               serverPriv != null &&
               serverPriv.isNotEmpty) {
-            // Save the server keys locally so next restart is instant.
-            await _storage.write(key: _publicKeyStorageKey, value: serverPub);
-            await _storage.write(key: _privateKeyStorageKey, value: serverPriv);
-            await _storage.write(key: _keyOwnerStorageKey, value: userId);
-            print('E2EE: Restored key pair from server backup.');
-            return serverPub;
+            
+            // If the server blob is encrypted, decrypt it locally BEFORE saving
+            String? decryptedPriv = serverPriv;
+            if (serverPriv.startsWith('aes-gcm:v1:')) {
+              if (backupKeyB64 != null) {
+                decryptedPriv = await decryptPrivateKeyBackup(serverPriv, backupKeyB64);
+              } else {
+                decryptedPriv = null; // Cannot restore without password derived key
+                print('E2EE: Server backup found, but backupKey is missing (requires login).');
+              }
+            }
+
+            if (decryptedPriv != null && decryptedPriv.isNotEmpty) {
+              // Save the server keys locally so next restart is instant.
+              await _storage.write(key: _publicKeyStorageKey, value: serverPub);
+              await _storage.write(key: _privateKeyStorageKey, value: decryptedPriv);
+              await _storage.write(key: _keyOwnerStorageKey, value: userId);
+              print('E2EE: Restored key pair from encrypted server backup.');
+              return serverPub;
+            }
           }
         }
       } catch (e) {
@@ -219,5 +307,6 @@ class E2eeService {
     await _storage.delete(key: _privateKeyStorageKey);
     await _storage.delete(key: _publicKeyStorageKey);
     await _storage.delete(key: _keyOwnerStorageKey);
+    await _storage.delete(key: _backupKeyStorageKey);
   }
 }

@@ -5,8 +5,13 @@ import '../app_theme.dart';
 
 class OtpVerificationScreen extends ConsumerStatefulWidget {
   final String email;
+  final String password;
 
-  const OtpVerificationScreen({super.key, required this.email});
+  const OtpVerificationScreen({
+    super.key,
+    required this.email,
+    required this.password,
+  });
 
   @override
   ConsumerState<OtpVerificationScreen> createState() =>
@@ -28,7 +33,7 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
     // Call Provider
     final success = await ref
         .read(authProvider.notifier)
-        .verifyOTP(widget.email, otp);
+        .verifyOTP(widget.email, otp, widget.password);
 
     if (success && mounted) {
       // Navigate to Home and remove all previous routes
