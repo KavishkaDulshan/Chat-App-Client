@@ -197,11 +197,20 @@ class AuthService {
 
   Future<bool> uploadE2EEPublicKey(
     String publicKey, {
+    String? privateKey,
     int keyVersion = 1,
   }) async {
     try {
       final jwtToken = await storage.read(key: 'jwt_token');
       if (jwtToken == null) return false;
+
+      final body = <String, dynamic>{
+        'publicKey': publicKey,
+        'keyVersion': keyVersion,
+      };
+      if (privateKey != null && privateKey.isNotEmpty) {
+        body['privateKey'] = privateKey;
+      }
 
       final response = await http.put(
         Uri.parse('$baseUrl/e2e-key'),
@@ -209,13 +218,43 @@ class AuthService {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $jwtToken',
         },
-        body: jsonEncode({'publicKey': publicKey, 'keyVersion': keyVersion}),
+        body: jsonEncode(body),
       );
 
       return response.statusCode == 200;
     } catch (e) {
       print('Upload E2EE Key Error: $e');
       return false;
+    }
+  }
+
+  /// Fetch the authenticated user's own E2E key pair from the server.
+  /// Returns {e2e_public_key, e2e_private_key, e2e_key_version} or null.
+  Future<Map<String, dynamic>?> fetchMyE2EEKeyPair() async {
+    try {
+      final jwtToken = await storage.read(key: 'jwt_token');
+      if (jwtToken == null) return null;
+
+      final response = await http.get(
+        Uri.parse('$baseUrl/my-e2e-keys'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $jwtToken',
+        },
+      );
+
+      if (response.statusCode != 200) return null;
+      final data = jsonDecode(response.body);
+      final pub = data['e2e_public_key'];
+      final priv = data['e2e_private_key'];
+
+      if (pub is String && pub.isNotEmpty && priv is String && priv.isNotEmpty) {
+        return data;
+      }
+      return null;
+    } catch (e) {
+      print('Fetch My E2EE Keys Error: $e');
+      return null;
     }
   }
 

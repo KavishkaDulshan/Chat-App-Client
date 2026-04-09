@@ -21,8 +21,22 @@ class AuthController extends Notifier<AuthState> {
     try {
       final e2eeService = ref.read(e2eeServiceProvider);
       final authService = ref.read(authServiceProvider);
-      final publicKey = await e2eeService.ensureIdentityKeyForUser(user.id);
-      await authService.uploadE2EEPublicKey(publicKey);
+
+      // ensureIdentityKeyForUser will:
+      //   1. Use local keys if available
+      //   2. Restore from server if local keys are missing
+      //   3. Generate new keys only as a last resort
+      final publicKey = await e2eeService.ensureIdentityKeyForUser(
+        user.id,
+        serverKeyFetcher: () => authService.fetchMyE2EEKeyPair(),
+      );
+
+      // Upload both keys so the server always has a backup for key restoration.
+      final privateKey = await e2eeService.getMyPrivateKey();
+      await authService.uploadE2EEPublicKey(
+        publicKey,
+        privateKey: privateKey,
+      );
     } catch (e) {
       print('E2EE Bootstrap Warning: $e');
     }

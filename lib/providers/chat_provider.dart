@@ -320,12 +320,14 @@ class ChatController extends Notifier<ChatState> {
 
     final myUserId = ref.read(authProvider).user?.id;
     if (myUserId == null || _activeOtherUserId.isEmpty) {
-      return {...message, 'content': '[Encrypted message]'};
+      // Cannot decrypt without identity — keep the raw ciphertext.
+      return message;
     }
 
     final peerKey = await _resolvePeerPublicKey();
     if (peerKey == null || peerKey.isEmpty) {
-      return {...message, 'content': '[Encrypted message]'};
+      // No peer key — keep original content.
+      return message;
     }
 
     try {
@@ -336,14 +338,15 @@ class ChatController extends Notifier<ChatState> {
         peerPublicKeyB64: peerKey,
       );
 
-      if (decrypted == null || decrypted.isEmpty) {
-        return {...message, 'content': '[Encrypted message]'};
+      if (decrypted != null && decrypted.isNotEmpty) {
+        return {...message, 'content': decrypted};
       }
-
-      return {...message, 'content': decrypted};
-    } catch (e) {
-      print('E2EE Decrypt Warning: $e');
-      return {...message, 'content': '[Encrypted message]'};
+      // Null/empty result — keep original content unchanged.
+      return message;
+    } catch (_) {
+      // Decryption failed — keep the original ciphertext rather than
+      // replacing it with a hardcoded placeholder.
+      return message;
     }
   }
 

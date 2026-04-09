@@ -311,17 +311,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       );
     }
 
-    if (conv.lastMessage == 'Encrypted message') {
+    // 4. If raw E2E ciphertext leaked through (decryption couldn't happen),
+    //    show a lock icon so the UI doesn't display raw gibberish.
+    if (conv.lastMessage.startsWith('e2e:v1:')) {
       return Row(
         children: const [
-          Icon(Icons.lock, size: 16, color: AppTheme.primary),
+          Icon(Icons.lock_outline, size: 16, color: AppTheme.primary),
           SizedBox(width: 4),
-          Text('Encrypted message', style: TextStyle(color: Colors.grey)),
+          Text('Message', style: TextStyle(color: Colors.grey)),
         ],
       );
     }
 
-    // 4. Default Text Message
+    // 5. Default: show the decrypted text preview
     return Text(
       conv.lastMessage,
       maxLines: 1,

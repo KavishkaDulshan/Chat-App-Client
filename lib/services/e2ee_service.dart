@@ -19,12 +19,27 @@ class E2eeService {
   final Hkdf _hkdf = Hkdf(hmac: Hmac.sha256(), outputLength: 32);
   final Random _random = Random.secure();
 
-  Future<String> ensureIdentityKeyForUser(String userId) async {
+  /// Ensures a stable key pair exists for [userId].
+  ///
+  /// Resolution order:
+  ///   1. Local secure storage (fastest)
+  ///   2. Server-side backup via [serverKeyFetcher] (cross-device / web restore)
+  ///   3. Generate a brand-new key pair (first-time only)
+  ///
+  /// Returns the base-64 encoded public key.
+  Future<String> ensureIdentityKeyForUser(
+    String userId, {
+    Future<Map<String, dynamic>?> Function()? serverKeyFetcher,
+  }) async {
+    // If the stored keys belong to a different user, clear them.
     final ownerUserId = await _storage.read(key: _keyOwnerStorageKey);
     if (ownerUserId != null && ownerUserId != userId) {
       await _clearIdentity();
     }
 
+    // ──────────────────────────────────────────────────────
+    // 1. Try local secure storage first
+    // ──────────────────────────────────────────────────────
     final existingPublicKey = await _storage.read(key: _publicKeyStorageKey);
     final existingPrivateKey = await _storage.read(key: _privateKeyStorageKey);
 
@@ -33,6 +48,36 @@ class E2eeService {
       return existingPublicKey;
     }
 
+    // ──────────────────────────────────────────────────────
+    // 2. Try to restore from server (handles web/cross-device)
+    // ──────────────────────────────────────────────────────
+    if (serverKeyFetcher != null) {
+      try {
+        final serverKeys = await serverKeyFetcher();
+        if (serverKeys != null) {
+          final serverPub = serverKeys['e2e_public_key'] as String?;
+          final serverPriv = serverKeys['e2e_private_key'] as String?;
+
+          if (serverPub != null &&
+              serverPub.isNotEmpty &&
+              serverPriv != null &&
+              serverPriv.isNotEmpty) {
+            // Save the server keys locally so next restart is instant.
+            await _storage.write(key: _publicKeyStorageKey, value: serverPub);
+            await _storage.write(key: _privateKeyStorageKey, value: serverPriv);
+            await _storage.write(key: _keyOwnerStorageKey, value: userId);
+            print('E2EE: Restored key pair from server backup.');
+            return serverPub;
+          }
+        }
+      } catch (e) {
+        print('E2EE: Server key restore failed — $e');
+      }
+    }
+
+    // ──────────────────────────────────────────────────────
+    // 3. Generate brand-new key pair (first-time registration)
+    // ──────────────────────────────────────────────────────
     final keyPair = await _x25519.newKeyPair();
     final publicKey = await keyPair.extractPublicKey();
     final privateKeyBytes = await keyPair.extractPrivateKeyBytes();
@@ -44,11 +89,16 @@ class E2eeService {
     await _storage.write(key: _privateKeyStorageKey, value: privateB64);
     await _storage.write(key: _keyOwnerStorageKey, value: userId);
 
+    print('E2EE: Generated new key pair (first-time setup).');
     return publicB64;
   }
 
   Future<String?> getMyPublicKey() async {
     return _storage.read(key: _publicKeyStorageKey);
+  }
+
+  Future<String?> getMyPrivateKey() async {
+    return _storage.read(key: _privateKeyStorageKey);
   }
 
   Future<String> encryptTextMessage({

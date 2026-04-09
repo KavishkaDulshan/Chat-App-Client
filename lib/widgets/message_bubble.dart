@@ -181,14 +181,40 @@ class MessageBubble extends StatelessWidget {
                             horizontal: 16,
                             vertical: 12,
                           ),
-                          child: Text(
-                            text,
-                            style: TextStyle(
-                              color: isMe ? Colors.white : AppTheme.textPrimary,
-                              fontSize: 15,
-                              height: 1.4,
-                            ),
-                          ),
+                          // Safety: if raw E2E ciphertext leaked through,
+                          // show a lock icon instead of raw gibberish.
+                          child: text.startsWith('e2e:v1:')
+                              ? Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.lock_outline,
+                                      size: 16,
+                                      color: isMe
+                                          ? Colors.white70
+                                          : Colors.grey,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      'Encrypted message',
+                                      style: TextStyle(
+                                        color: isMe
+                                            ? Colors.white70
+                                            : Colors.grey,
+                                        fontSize: 14,
+                                        fontStyle: FontStyle.italic,
+                                      ),
+                                    ),
+                                  ],
+                                )
+                              : Text(
+                                  text,
+                                  style: TextStyle(
+                                    color: isMe ? Colors.white : AppTheme.textPrimary,
+                                    fontSize: 15,
+                                    height: 1.4,
+                                  ),
+                                ),
                         ),
                 ),
                 ),

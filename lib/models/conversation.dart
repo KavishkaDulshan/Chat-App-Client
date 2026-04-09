@@ -5,7 +5,10 @@ class Conversation {
   final String? otherUserAvatar;
   final bool isOnline;
   final String lastMessage;
-  final bool lastMessageIsDeleted; // ✅ 1. Add Field
+  final bool lastMessageIsDeleted;
+  // ✅ Track whether the last message preview is still an E2E ciphertext
+  // (i.e., not yet decrypted on the client side)
+  final bool lastMessageIsEncrypted;
   final DateTime? updatedAt;
   final int unreadCount;
 
@@ -16,7 +19,8 @@ class Conversation {
     this.otherUserAvatar,
     this.isOnline = false,
     required this.lastMessage,
-    this.lastMessageIsDeleted = false, // ✅ 2. Default to false
+    this.lastMessageIsDeleted = false,
+    this.lastMessageIsEncrypted = false,
     this.updatedAt,
     this.unreadCount = 0,
   });
@@ -24,14 +28,19 @@ class Conversation {
   // Factory: Converts API /conversations/:id response
   factory Conversation.fromHistory(Map<String, dynamic> json) {
     final otherUser = json['otherUser'];
+    final rawLastMessage = json['lastMessage'] ?? 'Start chatting';
+    // Detect if the backend returned a raw E2E ciphertext (not yet decrypted)
+    final isEncrypted = rawLastMessage is String &&
+        rawLastMessage.startsWith('e2e:v1:');
     return Conversation(
       id: json['id'] ?? json['_id'] ?? '',
       otherUserId: otherUser['id'] ?? otherUser['_id'] ?? '',
       otherUserName: otherUser['username'] ?? 'Unknown',
       otherUserAvatar: otherUser['profile_pic'],
       isOnline: otherUser['is_online'] == true,
-      lastMessage: json['lastMessage'] ?? 'Start chatting',
+      lastMessage: rawLastMessage,
       lastMessageIsDeleted: json['lastMessageIsDeleted'] ?? false,
+      lastMessageIsEncrypted: isEncrypted,
       updatedAt: json['updatedAt'] != null
           ? DateTime.tryParse(json['updatedAt'])
           : null,
@@ -55,6 +64,7 @@ class Conversation {
     bool? isOnline,
     String? lastMessage,
     bool? lastMessageIsDeleted,
+    bool? lastMessageIsEncrypted,
     DateTime? time,
   }) {
     return Conversation(
@@ -63,7 +73,10 @@ class Conversation {
       otherUserName: otherUserName,
       otherUserAvatar: otherUserAvatar,
       isOnline: isOnline ?? this.isOnline,
-      lastMessage: lastMessage ?? this.lastMessage, // Ensure this updates
+      lastMessage: lastMessage ?? this.lastMessage,
+      lastMessageIsDeleted: lastMessageIsDeleted ?? this.lastMessageIsDeleted,
+      lastMessageIsEncrypted:
+          lastMessageIsEncrypted ?? this.lastMessageIsEncrypted,
       updatedAt: time ?? updatedAt,
       unreadCount: unreadCount,
     );
