@@ -45,17 +45,22 @@ class NotificationService {
       windows: windowsSettings,
     );
 
-    // Initialize the plugin
-    await _localNotifications.initialize(
-      initSettings,
-      onDidReceiveNotificationResponse: (NotificationResponse response) {
-        // Handle notification tap logic here if needed
-        print("🔔 Notification Tapped: ${response.payload}");
-      },
-    );
+    // Initialize the plugin (wrapped in try-catch because some platforms
+    // like Windows may not have the platform interface registered)
+    try {
+      await _localNotifications.initialize(
+        initSettings,
+        onDidReceiveNotificationResponse: (NotificationResponse response) {
+          // Handle notification tap logic here if needed
+          print("🔔 Notification Tapped: ${response.payload}");
+        },
+      );
+      print("✅ Local Notifications Initialized");
+    } catch (e) {
+      print("⚠️ Local Notifications Init Skipped: $e");
+    }
 
     _isInitialized = true;
-    print("✅ Local Notifications Initialized");
 
     // ------------------------------------------------
     // 2. WINDOWS GUARD (Skip FCM on Windows)
@@ -92,24 +97,28 @@ class NotificationService {
   // HELPER 1: Trigger Notification Manually (Fixes error G69E91ED9)
   // ------------------------------------------------
   Future<void> showLocalNotification(String title, String body) async {
-    const AndroidNotificationDetails androidDetails =
-        AndroidNotificationDetails(
-          'high_importance_channel',
-          'High Importance Notifications',
-          importance: Importance.max,
-          priority: Priority.high,
-        );
+    try {
+      const AndroidNotificationDetails androidDetails =
+          AndroidNotificationDetails(
+            'high_importance_channel',
+            'High Importance Notifications',
+            importance: Importance.max,
+            priority: Priority.high,
+          );
 
-    const NotificationDetails details = NotificationDetails(
-      android: androidDetails,
-    );
+      const NotificationDetails details = NotificationDetails(
+        android: androidDetails,
+      );
 
-    await _localNotifications.show(
-      DateTime.now().millisecond, // Unique ID
-      title,
-      body,
-      details,
-    );
+      await _localNotifications.show(
+        DateTime.now().millisecond, // Unique ID
+        title,
+        body,
+        details,
+      );
+    } catch (e) {
+      // Silently skip on platforms without notification support
+    }
   }
 
   // ------------------------------------------------
