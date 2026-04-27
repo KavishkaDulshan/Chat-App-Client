@@ -15,6 +15,8 @@ class ChatState {
   final bool isLoading;
   final bool isTyping;
   final bool isUploading;
+  final bool isLoadingMore;
+  final bool hasMoreMessages;
   final String? typingUser;
   final String activeRoomId;
 
@@ -23,6 +25,8 @@ class ChatState {
     this.isLoading = false,
     this.isTyping = false,
     this.isUploading = false,
+    this.isLoadingMore = false,
+    this.hasMoreMessages = true,
     this.typingUser,
     this.activeRoomId = '',
   });
@@ -32,6 +36,8 @@ class ChatState {
     bool? isLoading,
     bool? isTyping,
     bool? isUploading,
+    bool? isLoadingMore,
+    bool? hasMoreMessages,
     String? typingUser,
     String? activeRoomId,
   }) {
@@ -40,6 +46,8 @@ class ChatState {
       isLoading: isLoading ?? this.isLoading,
       isTyping: isTyping ?? this.isTyping,
       isUploading: isUploading ?? this.isUploading,
+      isLoadingMore: isLoadingMore ?? this.isLoadingMore,
+      hasMoreMessages: hasMoreMessages ?? this.hasMoreMessages,
       typingUser: typingUser ?? this.typingUser,
       activeRoomId: activeRoomId ?? this.activeRoomId,
     );
@@ -57,6 +65,7 @@ class ChatController extends Notifier<ChatState> {
 
   String _activeOtherUserId = '';
   String? _peerPublicKey;
+  bool _isListening = false;
 
   late Function(dynamic) _messageHandler;
   late Function(dynamic) _typingHandler;
@@ -65,6 +74,7 @@ class ChatController extends Notifier<ChatState> {
   late Function(dynamic) _readAckHandler;
   late Function(dynamic) _statusUpdateHandler;
   late Function(dynamic) _deleteHandler;
+  late Function(dynamic) _moreMessagesHandler;
 
   @override
   ChatState build() {
@@ -79,6 +89,8 @@ class ChatController extends Notifier<ChatState> {
       _socket.off('conversation:read_ack', _readAckHandler);
       _socket.off('message:status_update', _statusUpdateHandler);
       _socket.off('message:deleted', _deleteHandler);
+      _socket.off('more_messages', _moreMessagesHandler);
+      _isListening = false;
     });
 
     _defineHandlers();
@@ -102,6 +114,24 @@ class ChatController extends Notifier<ChatState> {
 
     _attachListeners();
     _socket.emit('join_private_chat', otherUserId);
+  }
+
+  /// BUG-1: Load older messages (cursor-based pagination)
+  Future<void> loadMoreMessages() async {
+    if (state.isLoadingMore || !state.hasMoreMessages || state.messages.isEmpty) return;
+
+    state = state.copyWith(isLoadingMore: true);
+
+    final oldestMessageId = state.messages.first['_id'];
+    if (oldestMessageId == null) {
+      state = state.copyWith(isLoadingMore: false);
+      return;
+    }
+
+    _socket.emit('load_more_messages', {
+      'roomId': state.activeRoomId,
+      'beforeId': oldestMessageId.toString(),
+    });
   }
 
   void _defineHandlers() {
@@ -128,6 +158,7 @@ class ChatController extends Notifier<ChatState> {
       final payload = Map<String, dynamic>.from(data);
       final incomingRoomId = payload['roomId']?.toString() ?? '';
       final historyRaw = payload['history'];
+      final hasMore = payload['hasMore'] == true;
       final historyList = historyRaw is List
           ? historyRaw
                 .whereType<Map>()
@@ -143,8 +174,35 @@ class ChatController extends Notifier<ChatState> {
         activeRoomId: incomingRoomId,
         messages: hydratedHistory,
         isLoading: false,
+        hasMoreMessages: hasMore,
       );
       _socket.emit('conversation:read', {'roomId': incomingRoomId});
+    };
+
+    _moreMessagesHandler = (data) async {
+      if (data is! Map) return;
+      final payload = Map<String, dynamic>.from(data);
+      final incomingRoomId = payload['roomId']?.toString() ?? '';
+      if (incomingRoomId != state.activeRoomId) return;
+
+      final messagesRaw = payload['messages'];
+      final hasMore = payload['hasMore'] == true;
+      final messagesList = messagesRaw is List
+          ? messagesRaw
+                .whereType<Map>()
+                .map((entry) => Map<String, dynamic>.from(entry))
+                .toList()
+          : <Map<String, dynamic>>[];
+
+      final hydratedMessages = await Future.wait(
+        messagesList.map(_hydrateMessageForDisplay),
+      );
+
+      state = state.copyWith(
+        messages: [...hydratedMessages, ...state.messages],
+        isLoadingMore: false,
+        hasMoreMessages: hasMore,
+      );
     };
 
     _typingHandler = (data) {
@@ -209,6 +267,9 @@ class ChatController extends Notifier<ChatState> {
   }
 
   void _attachListeners() {
+    // BUG-3: Guard against duplicate listener registration
+    if (_isListening) return;
+
     _socket.off('chat_message', _messageHandler);
     _socket.on('chat_message', _messageHandler);
 
@@ -229,6 +290,11 @@ class ChatController extends Notifier<ChatState> {
 
     _socket.off('message:deleted', _deleteHandler);
     _socket.on('message:deleted', _deleteHandler);
+
+    _socket.off('more_messages', _moreMessagesHandler);
+    _socket.on('more_messages', _moreMessagesHandler);
+
+    _isListening = true;
   }
 
   Future<void> sendMessage(String content, {String type = 'text'}) async {
@@ -302,6 +368,7 @@ class ChatController extends Notifier<ChatState> {
     });
   }
 
+  /// BUG-4: Show friendly placeholder for undecryptable E2EE messages
   Future<Map<String, dynamic>> _hydrateMessageForDisplay(
     Map<String, dynamic> message,
   ) async {
@@ -320,14 +387,14 @@ class ChatController extends Notifier<ChatState> {
 
     final myUserId = ref.read(authProvider).user?.id;
     if (myUserId == null || _activeOtherUserId.isEmpty) {
-      // Cannot decrypt without identity — keep the raw ciphertext.
-      return message;
+      // Cannot decrypt without identity — show friendly placeholder
+      return {...message, 'content': '🔒 Encrypted message'};
     }
 
     final peerKey = await _resolvePeerPublicKey();
     if (peerKey == null || peerKey.isEmpty) {
-      // No peer key — keep original content.
-      return message;
+      // No peer key — show friendly placeholder
+      return {...message, 'content': '🔒 Encrypted message'};
     }
 
     try {
@@ -341,12 +408,11 @@ class ChatController extends Notifier<ChatState> {
       if (decrypted != null && decrypted.isNotEmpty) {
         return {...message, 'content': decrypted};
       }
-      // Null/empty result — keep original content unchanged.
-      return message;
+      // Null/empty result — show friendly placeholder
+      return {...message, 'content': '🔒 Encrypted message'};
     } catch (_) {
-      // Decryption failed — keep the original ciphertext rather than
-      // replacing it with a hardcoded placeholder.
-      return message;
+      // Decryption failed — show friendly placeholder instead of gibberish
+      return {...message, 'content': '🔒 Encrypted message'};
     }
   }
 

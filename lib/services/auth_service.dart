@@ -296,7 +296,6 @@ class AuthService {
           'Authorization': 'Bearer $token',
         },
         body: jsonEncode({
-          'userId': userId, // Ensure your backend expects 'userId' in body
           'profile_pic': imageUrl,
         }),
       );

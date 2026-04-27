@@ -47,6 +47,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           .read(chatProvider.notifier)
           .joinChat(widget.roomId, widget.otherUserId, widget.initialHistory);
     });
+
+    // BUG-1: Listen for scroll-to-top to load older messages
+    _scrollController.addListener(_onScroll);
+  }
+
+  void _onScroll() {
+    if (_scrollController.position.pixels <=
+        _scrollController.position.minScrollExtent + 50) {
+      ref.read(chatProvider.notifier).loadMoreMessages();
+    }
   }
 
   void _scrollToBottom() {
@@ -61,6 +71,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   @override
   void dispose() {
+    _scrollController.removeListener(_onScroll);
     _audioService.dispose(); // Clean up audio resources
     _messageController.dispose();
     _scrollController.dispose();
@@ -105,7 +116,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
     // Auto-scroll when new messages arrive
     ref.listen(chatProvider, (previous, next) {
-      if (next.messages.length > (previous?.messages.length ?? 0)) {
+      if (next.messages.length > (previous?.messages.length ?? 0) &&
+          !next.isLoadingMore) {
         Future.delayed(const Duration(milliseconds: 100), _scrollToBottom);
       }
     });
@@ -142,65 +154,82 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         children: [
           // --- Message List ---
           Expanded(
-            child: ListView.builder(
-              controller: _scrollController,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
-              itemCount: chatState.messages.length,
-              itemBuilder: (context, index) {
-                final msg = chatState.messages[index];
-                final isMe = msg['sender_id'] == myUserId;
-                final isDeleted = msg['isDeleted'] == true;
+            child: Column(
+              children: [
+                // BUG-1: Loading indicator when fetching older messages
+                if (chatState.isLoadingMore)
+                  const Padding(
+                    padding: EdgeInsets.all(8.0),
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ),
+                Expanded(
+                  child: ListView.builder(
+                    controller: _scrollController,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 20),
+                    itemCount: chatState.messages.length,
+                    itemBuilder: (context, index) {
+                      final msg = chatState.messages[index];
+                      final isMe = msg['sender_id'] == myUserId;
+                      final isDeleted = msg['isDeleted'] == true;
 
-                // Handle Deleted Message UI
-                if (isDeleted) {
-                  return Align(
-                    alignment: isMe
-                        ? Alignment.centerRight
-                        : Alignment.centerLeft,
-                    child: Container(
-                      margin: const EdgeInsets.symmetric(vertical: 5),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.grey[200],
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: const [
-                          Icon(Icons.block, size: 14, color: Colors.grey),
-                          SizedBox(width: 5),
-                          Text(
-                            "This message was deleted",
-                            style: TextStyle(
-                              color: Colors.grey,
-                              fontStyle: FontStyle.italic,
-                              fontSize: 13,
+                      // Handle Deleted Message UI
+                      if (isDeleted) {
+                        return Align(
+                          alignment: isMe
+                              ? Alignment.centerRight
+                              : Alignment.centerLeft,
+                          child: Container(
+                            margin: const EdgeInsets.symmetric(vertical: 5),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.grey[200],
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: const [
+                                Icon(Icons.block, size: 14, color: Colors.grey),
+                                SizedBox(width: 5),
+                                Text(
+                                  "This message was deleted",
+                                  style: TextStyle(
+                                    color: Colors.grey,
+                                    fontStyle: FontStyle.italic,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                        ],
-                      ),
-                    ),
-                  );
-                }
+                        );
+                      }
 
-                return GestureDetector(
-                  onLongPress: isMe
-                      ? () => _handleDeleteMessage(context, msg['_id'])
-                      : null,
-                  child: MessageBubble(
-                    sender: msg['sender_name'] ?? 'Unknown',
-                    senderAvatar: msg['sender_avatar'],
-                    text: msg['content'] ?? '',
-                    time: _formatTime(msg['timestamp']),
-                    isMe: isMe,
-                    type: msg['type'] ?? 'text',
-                    status: msg['status'] ?? 'sent',
+                      return GestureDetector(
+                        onLongPress: isMe
+                            ? () => _handleDeleteMessage(context, msg['_id'])
+                            : null,
+                        child: MessageBubble(
+                          sender: msg['sender_name'] ?? 'Unknown',
+                          senderAvatar: msg['sender_avatar'],
+                          text: msg['content'] ?? '',
+                          time: _formatTime(msg['timestamp']),
+                          isMe: isMe,
+                          type: msg['type'] ?? 'text',
+                          status: msg['status'] ?? 'sent',
+                        ),
+                      );
+                    },
                   ),
-                );
-              },
+                ),
+              ],
             ),
           ),
 
