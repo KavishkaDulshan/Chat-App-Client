@@ -82,6 +82,10 @@ class ConversationsNotifier extends Notifier<ConversationState> {
   // 1. Load History (Default) — Cache-first
   // ──────────────────────────────────────────────────────────────────────────
   Future<void> loadChats() async {
+    // Snapshot cached conversations before any server call,
+    // so we can fall back to them if the server is unreachable.
+    List<Conversation> cachedSnapshot = [];
+
     try {
       // ── Cache-first: show local data instantly ──
       final db = ref.read(localDbProvider);
@@ -89,9 +93,9 @@ class ConversationsNotifier extends Notifier<ConversationState> {
         try {
           final cached = await db.getAllConversations();
           if (cached.isNotEmpty) {
-            final cachedConvs = cached.map(_cachedConversationToModel).toList();
+            cachedSnapshot = cached.map(_cachedConversationToModel).toList();
             state = ConversationState(
-              conversations: cachedConvs,
+              conversations: cachedSnapshot,
               isLoading: true, // still fetching from server
             );
           } else {
@@ -103,10 +107,26 @@ class ConversationsNotifier extends Notifier<ConversationState> {
         }
       } else if (state.conversations.isEmpty) {
         state = ConversationState(conversations: [], isLoading: true);
+      } else {
+        // Already have data from a previous load — keep it as snapshot
+        cachedSnapshot = List.from(state.conversations);
       }
 
       // ── Fetch fresh data from server ──
       final rawData = await ref.read(authServiceProvider).getConversations();
+
+      // ── KEY FIX: getConversations() returns [] BOTH when server says
+      // "no conversations" AND when the network call fails (it swallows
+      // errors). If we have cached data and server returned empty, keep
+      // the cached data — the user is likely offline. ──
+      if (rawData.isEmpty && cachedSnapshot.isNotEmpty) {
+        state = ConversationState(
+          conversations: cachedSnapshot,
+          isLoading: false,
+        );
+        _setupSocketListeners();
+        return;
+      }
 
       List<Conversation> cleanList = rawData
           .map((item) => Conversation.fromHistory(item as Map<String, dynamic>))
@@ -147,14 +167,12 @@ class ConversationsNotifier extends Notifier<ConversationState> {
     } catch (e) {
       print("Load Chats Error: $e");
       // If server fetch fails but we have cached data, keep showing it
-      if (state.conversations.isNotEmpty) {
-        state = ConversationState(
-          conversations: state.conversations,
-          isLoading: false,
-        );
-      } else {
-        state = ConversationState(conversations: [], isLoading: false);
-      }
+      final fallback =
+          state.conversations.isNotEmpty ? state.conversations : cachedSnapshot;
+      state = ConversationState(
+        conversations: fallback,
+        isLoading: false,
+      );
     }
   }
 
