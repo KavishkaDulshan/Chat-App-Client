@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -163,9 +162,9 @@ class AuthService {
     await storage.delete(key: 'user_data');
   }
 
-  // --- FCM TOKEN SYNC ---
+  // --- FCM TOKEN SYNC (Android only) ---
   Future<void> _syncFcmToken() async {
-    if (kIsWeb || Platform.isWindows) return;
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
 
     try {
       final fcmToken = await FirebaseMessaging.instance.getToken();

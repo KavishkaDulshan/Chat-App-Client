@@ -1,12 +1,9 @@
-import 'dart:io';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/conversation.dart';
 import '../services/auth_service.dart';
 import '../services/e2ee_service.dart';
 import '../providers/socket_provider.dart';
 import '../providers/auth_provider.dart';
-import '../services/notification_service.dart';
 
 // Cache for peer public keys to avoid redundant API calls
 final _peerKeyCache = <String, String>{};
@@ -241,13 +238,6 @@ class ConversationsNotifier extends Notifier<ConversationState> {
         isLoading: false,
       );
 
-      // Notification
-      if (senderId != myId && !kIsWeb && Platform.isWindows) {
-        NotificationService().showLocalNotification(
-          data['sender_name'] ?? "New Message",
-          content,
-        );
-      }
     });
 
     // B. Handle Online Status
