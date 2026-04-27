@@ -30,10 +30,17 @@ dependencies:
   permission_handler: ^11.3.0
   record: ^5.2.0 # Upgrade to 5.2.0 to fix platform conflicts
 
+  # Local Database (Offline Message Cache)
+  drift: ^2.22.1
+  drift_flutter: ^0.2.4
+  sqlite3_flutter_libs: ^0.5.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  drift_dev: ^2.22.1
+  build_runner: ^2.4.0
 
 flutter:
   uses-material-design: true

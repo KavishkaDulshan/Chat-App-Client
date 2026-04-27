@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:drift/drift.dart' show Value;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
@@ -7,7 +8,9 @@ import 'package:socket_io_client/socket_io_client.dart' as IO;
 import '../services/auth_service.dart';
 import '../services/e2ee_service.dart';
 import '../services/image_service.dart';
+import '../services/local_db/database.dart';
 import 'auth_provider.dart';
+import 'local_db_provider.dart';
 import 'socket_provider.dart';
 
 class ChatState {
@@ -112,6 +115,24 @@ class ChatController extends Notifier<ChatState> {
       isLoading: true,
     );
 
+    // ── Cache-first: load from local DB instantly ──
+    final db = ref.read(localDbProvider);
+    if (db != null) {
+      try {
+        final cached = await db.getMessages(roomId);
+        if (cached.isNotEmpty) {
+          final cachedMaps = cached.map(_cachedMessageToMap).toList();
+          state = state.copyWith(
+            activeRoomId: roomId,
+            messages: cachedMaps,
+            isLoading: true, // still loading from server
+          );
+        }
+      } catch (e) {
+        print('Cache read error: $e');
+      }
+    }
+
     _attachListeners();
     _socket.emit('join_private_chat', otherUserId);
   }
@@ -148,6 +169,9 @@ class ChatController extends Notifier<ChatState> {
       final hydrated = await _hydrateMessageForDisplay(incoming);
       state = state.copyWith(messages: [...state.messages, hydrated]);
 
+      // Cache the new message locally
+      _cacheMessages([hydrated], incomingRoomId);
+
       if (incoming['sender_id'] != myUserId) {
         _socket.emit('conversation:read', {'roomId': state.activeRoomId});
       }
@@ -176,6 +200,10 @@ class ChatController extends Notifier<ChatState> {
         isLoading: false,
         hasMoreMessages: hasMore,
       );
+
+      // Cache server history locally
+      _cacheMessages(hydratedHistory, incomingRoomId);
+
       _socket.emit('conversation:read', {'roomId': incomingRoomId});
     };
 
@@ -203,6 +231,9 @@ class ChatController extends Notifier<ChatState> {
         isLoadingMore: false,
         hasMoreMessages: hasMore,
       );
+
+      // Cache paginated messages
+      _cacheMessages(hydratedMessages, incomingRoomId);
     };
 
     _typingHandler = (data) {
@@ -263,6 +294,10 @@ class ChatController extends Notifier<ChatState> {
         return msg;
       }).toList();
       state = state.copyWith(messages: updatedMessages);
+
+      // Update local cache
+      final db = ref.read(localDbProvider);
+      db?.markMessageDeleted(messageId.toString());
     };
   }
 
@@ -434,5 +469,68 @@ class ChatController extends Notifier<ChatState> {
       print('E2EE Peer Key Fetch Warning: $e');
       return null;
     }
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // LOCAL DB CACHE HELPERS
+  // ──────────────────────────────────────────────────────────────────────────
+
+  /// Fire-and-forget: upsert a list of hydrated message maps into local DB.
+  void _cacheMessages(List<Map<String, dynamic>> messages, String roomId) {
+    final db = ref.read(localDbProvider);
+    if (db == null) return;
+
+    try {
+      final companions = messages
+          .where((m) => m['_id'] != null)
+          .map((m) => _mapToCompanion(m, roomId))
+          .toList();
+      if (companions.isNotEmpty) {
+        db.upsertMessages(companions);
+      }
+    } catch (e) {
+      print('Cache write error: $e');
+    }
+  }
+
+  /// Convert a message Map (from socket/server) → Drift CachedMessagesCompanion.
+  CachedMessagesCompanion _mapToCompanion(
+      Map<String, dynamic> m, String roomId) {
+    DateTime ts;
+    try {
+      ts = DateTime.parse(m['createdAt'] ?? m['timestamp'] ?? '');
+    } catch (_) {
+      ts = DateTime.now();
+    }
+
+    return CachedMessagesCompanion.insert(
+      id: m['_id'].toString(),
+      conversationId: (m['conversation_id'] ?? roomId).toString(),
+      senderId: (m['sender_id'] ?? '').toString(),
+      senderName: Value(
+          (m['sender_name'] ?? m['senderName'] ?? 'Unknown').toString()),
+      senderAvatar: Value(m['sender_avatar']?.toString()),
+      content: (m['content'] ?? '').toString(),
+      type: Value((m['type'] ?? 'text').toString()),
+      status: Value((m['status'] ?? 'sent').toString()),
+      isDeleted: Value(m['isDeleted'] == true),
+      timestamp: ts,
+    );
+  }
+
+  /// Convert a Drift CachedMessage object → Map for the UI layer.
+  Map<String, dynamic> _cachedMessageToMap(CachedMessage m) {
+    return {
+      '_id': m.id,
+      'conversation_id': m.conversationId,
+      'sender_id': m.senderId,
+      'sender_name': m.senderName,
+      'sender_avatar': m.senderAvatar,
+      'content': m.content,
+      'type': m.type,
+      'status': m.status,
+      'isDeleted': m.isDeleted,
+      'createdAt': m.timestamp.toIso8601String(),
+    };
   }
 }

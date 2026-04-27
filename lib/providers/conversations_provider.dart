@@ -1,9 +1,12 @@
+import 'package:drift/drift.dart' show Value;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/conversation.dart';
 import '../services/auth_service.dart';
 import '../services/e2ee_service.dart';
+import '../services/local_db/database.dart';
 import '../providers/socket_provider.dart';
 import '../providers/auth_provider.dart';
+import '../providers/local_db_provider.dart';
 
 // Cache for peer public keys to avoid redundant API calls
 final _peerKeyCache = <String, String>{};
@@ -76,15 +79,33 @@ class ConversationsNotifier extends Notifier<ConversationState> {
   }
 
   // ──────────────────────────────────────────────────────────────────────────
-  // 1. Load History (Default)
+  // 1. Load History (Default) — Cache-first
   // ──────────────────────────────────────────────────────────────────────────
   Future<void> loadChats() async {
     try {
-      // Don't show loading spinner if we already have data (silent refresh)
-      if (state.conversations.isEmpty) {
+      // ── Cache-first: show local data instantly ──
+      final db = ref.read(localDbProvider);
+      if (db != null && state.conversations.isEmpty) {
+        try {
+          final cached = await db.getAllConversations();
+          if (cached.isNotEmpty) {
+            final cachedConvs = cached.map(_cachedConversationToModel).toList();
+            state = ConversationState(
+              conversations: cachedConvs,
+              isLoading: true, // still fetching from server
+            );
+          } else {
+            state = ConversationState(conversations: [], isLoading: true);
+          }
+        } catch (e) {
+          print('Conv cache read error: $e');
+          state = ConversationState(conversations: [], isLoading: true);
+        }
+      } else if (state.conversations.isEmpty) {
         state = ConversationState(conversations: [], isLoading: true);
       }
 
+      // ── Fetch fresh data from server ──
       final rawData = await ref.read(authServiceProvider).getConversations();
 
       List<Conversation> cleanList = rawData
@@ -108,7 +129,6 @@ class ConversationsNotifier extends Notifier<ConversationState> {
                   lastMessageIsEncrypted: false,
                 );
               }
-              // Decryption failed — keep the raw ciphertext (UI will handle)
             }
             return conv;
           }),
@@ -119,10 +139,22 @@ class ConversationsNotifier extends Notifier<ConversationState> {
         conversations: _deduplicate(cleanList),
         isLoading: false,
       );
+
+      // ── Write server data to local cache ──
+      _cacheConversations(cleanList);
+
       _setupSocketListeners();
     } catch (e) {
       print("Load Chats Error: $e");
-      state = ConversationState(conversations: [], isLoading: false);
+      // If server fetch fails but we have cached data, keep showing it
+      if (state.conversations.isNotEmpty) {
+        state = ConversationState(
+          conversations: state.conversations,
+          isLoading: false,
+        );
+      } else {
+        state = ConversationState(conversations: [], isLoading: false);
+      }
     }
   }
 
@@ -238,6 +270,18 @@ class ConversationsNotifier extends Notifier<ConversationState> {
         isLoading: false,
       );
 
+      // Update the local cache with the new last message
+      if (updatedConv.id.isNotEmpty) {
+        final db = ref.read(localDbProvider);
+        db?.updateConversationLastMessage(
+          conversationId: updatedConv.id,
+          lastMessage: content,
+          lastMessageType: 'text',
+          lastMessageIsDeleted: false,
+          updatedAt: DateTime.now(),
+        );
+      }
+
     });
 
     // B. Handle Online Status
@@ -282,5 +326,50 @@ class ConversationsNotifier extends Notifier<ConversationState> {
       seen.add(conv.otherUserId);
       return true;
     }).toList();
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // LOCAL DB CACHE HELPERS
+  // ──────────────────────────────────────────────────────────────────────────
+
+  /// Fire-and-forget: write conversations to local cache.
+  void _cacheConversations(List<Conversation> conversations) {
+    final db = ref.read(localDbProvider);
+    if (db == null) return;
+
+    try {
+      final companions = conversations
+          .where((c) => c.id.isNotEmpty)
+          .map((c) => CachedConversationsCompanion.insert(
+                id: c.id,
+                otherUserId: c.otherUserId,
+                otherUserName: Value(c.otherUserName),
+                otherUserAvatar: Value(c.otherUserAvatar),
+                lastMessage: Value(c.lastMessage),
+                lastMessageType: const Value('text'),
+                lastMessageIsDeleted: Value(c.lastMessageIsDeleted),
+                updatedAt: Value(c.updatedAt),
+              ))
+          .toList();
+
+      if (companions.isNotEmpty) {
+        db.upsertConversations(companions);
+      }
+    } catch (e) {
+      print('Conv cache write error: $e');
+    }
+  }
+
+  /// Convert a Drift CachedConversation → Conversation model for the UI.
+  Conversation _cachedConversationToModel(CachedConversation c) {
+    return Conversation(
+      id: c.id,
+      otherUserId: c.otherUserId,
+      otherUserName: c.otherUserName,
+      otherUserAvatar: c.otherUserAvatar,
+      lastMessage: c.lastMessage,
+      lastMessageIsDeleted: c.lastMessageIsDeleted,
+      updatedAt: c.updatedAt,
+    );
   }
 }

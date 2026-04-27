@@ -2,7 +2,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/user_model.dart';
 import '../services/auth_service.dart';
 import '../services/e2ee_service.dart';
-import '../providers/socket_provider.dart'; // Import Socket Provider
+import '../providers/socket_provider.dart';
+import '../providers/local_db_provider.dart';
 
 class AuthState {
   final User? user;
@@ -69,6 +70,12 @@ class AuthController extends Notifier<AuthState> {
     });
   }
 
+  // Helper to initialize local database for the logged-in user
+  Future<void> _initLocalDatabase(User user) async {
+    final db = await initLocalDb(user.id);
+    ref.read(localDbProvider.notifier).state = db;
+  }
+
   Future<void> checkAuthStatus() async {
     state = AuthState(isLoading: true);
     final authService = ref.read(authServiceProvider);
@@ -78,6 +85,7 @@ class AuthController extends Notifier<AuthState> {
       // Auto-login does not have the password, so backupKey is fetched from secure storage
       await _bootstrapE2EE(user);
       _connectSocket(user);
+      await _initLocalDatabase(user);
       state = AuthState(user: user, isLoading: false);
     } else {
       state = AuthState(isLoading: false);
@@ -93,6 +101,7 @@ class AuthController extends Notifier<AuthState> {
       // Pass the password to bootstrap so we can derive the key
       await _bootstrapE2EE(user, password: password);
       _connectSocket(user);
+      await _initLocalDatabase(user);
       state = AuthState(user: user, isLoading: false);
     } else {
       state = AuthState(
@@ -112,15 +121,19 @@ class AuthController extends Notifier<AuthState> {
 
   Future<void> logout() async {
     try {
-      // 1. Try to disconnect socket
+      // 1. Close local database
+      await closeLocalDb(ref.read(localDbProvider));
+      ref.read(localDbProvider.notifier).state = null;
+
+      // 2. Try to disconnect socket
       ref.read(socketServiceProvider).disconnect();
 
-      // 2. Try to notify server
+      // 3. Try to notify server
       await ref.read(authServiceProvider).logout();
     } catch (e) {
       print("Logout Warning: $e");
     } finally {
-      // 3. ALWAYS clear local state, even if errors occur above
+      // 4. ALWAYS clear local state, even if errors occur above
       state = AuthState();
     }
   }
@@ -135,6 +148,7 @@ class AuthController extends Notifier<AuthState> {
       // Pass the password to bootstrap so we can derive the key
       await _bootstrapE2EE(user, password: password);
       _connectSocket(user);
+      await _initLocalDatabase(user);
       state = AuthState(user: user, isLoading: false);
       return true;
     } else {
