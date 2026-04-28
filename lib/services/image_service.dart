@@ -6,6 +6,7 @@ import '../config.dart';
 
 class ImageService {
   String get uploadUrl => '${AppConfig.baseUrl}/upload';
+  String get profileUploadUrl => '${AppConfig.baseUrl}/upload/profile';
 
   final Dio _dio = Dio();
   final ImagePicker _picker = ImagePicker();
@@ -25,29 +26,38 @@ class ImageService {
     return null;
   }
 
-  // ✅ FIXED: Accept XFile instead of File
+  // ✅ General image upload (chat images)
   Future<String?> uploadImage(XFile file) async {
+    return _upload(file, uploadUrl);
+  }
+
+  // ✅ Profile picture upload (uses dedicated endpoint for 256px compression)
+  Future<String?> uploadProfileImage(XFile file) async {
+    return _upload(file, profileUploadUrl);
+  }
+
+  // Shared upload logic
+  Future<String?> _upload(XFile file, String url) async {
     try {
       FormData formData;
 
-      // ... inside uploadImage method ...
       if (kIsWeb) {
         Uint8List bytes = await file.readAsBytes();
         formData = FormData.fromMap({
           "file": MultipartFile.fromBytes(
             bytes,
             filename: file.name,
-          ), // Changed 'image' to 'file'
+          ),
         });
       } else {
         formData = FormData.fromMap({
           "file": await MultipartFile.fromFile(
             file.path,
             filename: file.name,
-          ), // Changed 'image' to 'file'
+          ),
         });
       }
-      Response response = await _dio.post(uploadUrl, data: formData);
+      Response response = await _dio.post(url, data: formData);
 
       if (response.statusCode == 200) {
         return response.data['url'];

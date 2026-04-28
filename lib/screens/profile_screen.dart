@@ -31,8 +31,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
     setState(() => _isUploading = true);
 
-    // 2. Upload to Cloudinary via your Backend
-    final String? imageUrl = await imageService.uploadImage(file);
+    // 2. Upload to Azure via Backend (256px compressed profile endpoint)
+    final String? imageUrl = await imageService.uploadProfileImage(file);
 
     if (imageUrl != null) {
       // 3. Update User Profile in MongoDB
