@@ -1,5 +1,10 @@
+import 'dart:convert';
+import 'dart:io';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:http/http.dart' as http;
 class AudioBubble extends StatefulWidget {
   final String url;
   final bool isMe;
@@ -70,13 +75,67 @@ class _AudioBubbleState extends State<AudioBubble> {
     } else {
       setState(() => _isLoading = true);
       try {
-        await _player.play(UrlSource(widget.url));
+        // Try to play from local cache first, then fall back to network
+        final localPath = await _getCachedAudioPath();
+        if (localPath != null) {
+          await _player.play(DeviceFileSource(localPath));
+        } else {
+          // Play from network and cache in background
+          await _player.play(UrlSource(widget.url));
+          _cacheAudioInBackground();
+        }
         setState(() => _isLoading = false);
       } catch (e) {
         print("Play Error: $e");
         if (mounted) setState(() => _isLoading = false);
       }
     }
+  }
+
+  /// Returns local file path if the audio is already cached, null otherwise.
+  Future<String?> _getCachedAudioPath() async {
+    if (kIsWeb) return null; // No file cache on web
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final fileName = _urlToFileName(widget.url);
+      final file = File('${dir.path}/audio_cache/$fileName');
+      if (await file.exists()) {
+        return file.path;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// Downloads and caches the audio file in the background.
+  void _cacheAudioInBackground() async {
+    if (kIsWeb) return;
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final cacheDir = Directory('${dir.path}/audio_cache');
+      if (!await cacheDir.exists()) {
+        await cacheDir.create(recursive: true);
+      }
+      final fileName = _urlToFileName(widget.url);
+      final file = File('${cacheDir.path}/$fileName');
+      if (await file.exists()) return; // Already cached
+
+      final response = await http.get(Uri.parse(widget.url));
+      if (response.statusCode == 200) {
+        await file.writeAsBytes(response.bodyBytes);
+      }
+    } catch (_) {
+      // Silently fail — audio still played from network
+    }
+  }
+
+  /// Convert URL to a safe filename using a simple hash.
+  String _urlToFileName(String url) {
+    final bytes = utf8.encode(url);
+    // Simple hash: take last 32 chars of base64
+    final hash = base64Encode(bytes);
+    final safeHash = hash.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '');
+    final ext = url.contains('.mp3') ? '.mp3' : '.m4a';
+    return '${safeHash.substring(safeHash.length > 32 ? safeHash.length - 32 : 0)}$ext';
   }
 
   String _formatDuration(Duration d) {

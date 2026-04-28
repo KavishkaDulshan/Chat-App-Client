@@ -35,6 +35,9 @@ dependencies:
   drift_flutter: ^0.2.4
   sqlite3_flutter_libs: ^0.5.0
 
+  # Local Media Caching
+  cached_network_image: ^3.4.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

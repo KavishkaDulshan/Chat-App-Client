@@ -1,4 +1,5 @@
 // REMOVED: import 'dart:io'; <-- Caused Web Crash
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart'; // <-- ADDED THIS
@@ -89,17 +90,31 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         shape: BoxShape.circle,
                         border: Border.all(color: const Color(0xFFE2E8F0), width: 4),
                       ),
-                      child: CircleAvatar(
-                        radius: 64,
-                        backgroundColor: AppTheme.secondary,
-                        backgroundImage:
-                            (user?.profilePic != null && user!.profilePic!.isNotEmpty)
-                            ? NetworkImage(user.profilePic!)
-                            : null,
-                        child: (user?.profilePic == null || user!.profilePic!.isEmpty)
-                            ? Icon(Icons.person_outline, size: 64, color: AppTheme.textSecondary)
-                            : null,
-                      ),
+                      child: (user?.profilePic != null && user!.profilePic!.isNotEmpty)
+                          ? CachedNetworkImage(
+                              imageUrl: user.profilePic!,
+                              maxWidthDiskCache: 256,
+                              maxHeightDiskCache: 256,
+                              imageBuilder: (context, imageProvider) => CircleAvatar(
+                                radius: 64,
+                                backgroundImage: imageProvider,
+                              ),
+                              placeholder: (context, url) => CircleAvatar(
+                                radius: 64,
+                                backgroundColor: AppTheme.secondary,
+                                child: const CircularProgressIndicator(strokeWidth: 2),
+                              ),
+                              errorWidget: (context, url, error) => CircleAvatar(
+                                radius: 64,
+                                backgroundColor: AppTheme.secondary,
+                                child: Icon(Icons.person_outline, size: 64, color: AppTheme.textSecondary),
+                              ),
+                            )
+                          : CircleAvatar(
+                              radius: 64,
+                              backgroundColor: AppTheme.secondary,
+                              child: Icon(Icons.person_outline, size: 64, color: AppTheme.textSecondary),
+                            ),
                     ),
                     Positioned(
                       bottom: 4,

@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:photo_view/photo_view.dart'; // Import the new package
 
@@ -14,7 +15,7 @@ class FullScreenImage extends StatelessWidget {
         children: [
           // 1. The Professional Image Viewer
           PhotoView(
-            imageProvider: NetworkImage(imageUrl),
+            imageProvider: CachedNetworkImageProvider(imageUrl),
 
             // Fixes the "Black Bars" crop issue by allowing the image
             // to cover the full screen when zoomed.

@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/auth_provider.dart';
@@ -216,28 +217,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         leading: Stack(
           children: [
-            CircleAvatar(
+            _buildCachedAvatar(
+              url: conv.otherUserAvatar,
+              fallbackChar: conv.otherUserName.isNotEmpty
+                  ? conv.otherUserName[0].toUpperCase()
+                  : "?",
               radius: 28,
-              backgroundColor: AppTheme.primary.withOpacity(0.2),
-              backgroundImage:
-                  (conv.otherUserAvatar != null &&
-                      conv.otherUserAvatar!.isNotEmpty)
-                  ? NetworkImage(conv.otherUserAvatar!)
-                  : null,
-              child:
-                  (conv.otherUserAvatar == null ||
-                      conv.otherUserAvatar!.isEmpty)
-                  ? Text(
-                      conv.otherUserName.isNotEmpty
-                          ? conv.otherUserName[0].toUpperCase()
-                          : "?",
-                      style: const TextStyle(
-                        color: AppTheme.primary,
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    )
-                  : null,
             ),
             if (conv.isOnline)
               Positioned(
@@ -329,6 +314,61 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
       style: AppTheme.subTitleStyle,
+    );
+  }
+
+  /// Cached avatar with disk persistence — works offline after first load.
+  Widget _buildCachedAvatar({
+    required String? url,
+    required String fallbackChar,
+    required double radius,
+  }) {
+    if (url == null || url.isEmpty) {
+      return CircleAvatar(
+        radius: radius,
+        backgroundColor: AppTheme.primary.withValues(alpha: 0.2),
+        child: Text(
+          fallbackChar,
+          style: TextStyle(
+            color: AppTheme.primary,
+            fontSize: radius * 0.65,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      );
+    }
+
+    return CachedNetworkImage(
+      imageUrl: url,
+      maxWidthDiskCache: 128,
+      maxHeightDiskCache: 128,
+      memCacheWidth: (radius * 2).toInt(),
+      memCacheHeight: (radius * 2).toInt(),
+      imageBuilder: (context, imageProvider) => CircleAvatar(
+        radius: radius,
+        backgroundImage: imageProvider,
+      ),
+      placeholder: (context, url) => CircleAvatar(
+        radius: radius,
+        backgroundColor: AppTheme.primary.withValues(alpha: 0.2),
+        child: const SizedBox(
+          width: 20,
+          height: 20,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+      ),
+      errorWidget: (context, url, error) => CircleAvatar(
+        radius: radius,
+        backgroundColor: AppTheme.primary.withValues(alpha: 0.2),
+        child: Text(
+          fallbackChar,
+          style: TextStyle(
+            color: AppTheme.primary,
+            fontSize: radius * 0.65,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ),
     );
   }
 }

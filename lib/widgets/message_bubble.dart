@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import '../app_theme.dart';
 import '../screens/full_screen_image.dart';
@@ -36,20 +37,7 @@ class MessageBubble extends StatelessWidget {
         children: [
           // 1. SHOW AVATAR (Only for other users)
           if (!isMe) ...[
-            CircleAvatar(
-              radius: 16,
-              backgroundColor: Colors.grey[300],
-              backgroundImage:
-                  (senderAvatar != null && senderAvatar!.isNotEmpty)
-                  ? NetworkImage(senderAvatar!)
-                  : null,
-              child: (senderAvatar == null || senderAvatar!.isEmpty)
-                  ? Text(
-                      sender.isNotEmpty ? sender[0].toUpperCase() : "?",
-                      style: const TextStyle(fontSize: 12, color: Colors.black),
-                    )
-                  : null,
-            ),
+            _buildCachedSenderAvatar(),
             const SizedBox(width: 8),
           ],
 
@@ -118,34 +106,25 @@ class MessageBubble extends StatelessWidget {
                           },
                           child: ClipRRect(
                             borderRadius: BorderRadius.circular(12),
-                            child: Image.network(
-                              text,
+                            child: CachedNetworkImage(
+                              imageUrl: text,
+                              maxWidthDiskCache: 800,
+                              maxHeightDiskCache: 800,
                               fit: BoxFit.contain,
-                              loadingBuilder: (ctx, child, loadingProgress) {
-                                if (loadingProgress == null) return child;
-                                return Container(
-                                  constraints: const BoxConstraints(
-                                    minHeight: 150,
-                                    minWidth: 150,
+                              placeholder: (ctx, url) => Container(
+                                constraints: const BoxConstraints(
+                                  minHeight: 150,
+                                  minWidth: 150,
+                                ),
+                                child: Center(
+                                  child: CircularProgressIndicator(
+                                    color: isMe
+                                        ? Colors.white
+                                        : AppTheme.primary,
                                   ),
-                                  child: Center(
-                                    child: CircularProgressIndicator(
-                                      value:
-                                          loadingProgress.expectedTotalBytes !=
-                                              null
-                                          ? loadingProgress
-                                                    .cumulativeBytesLoaded /
-                                                loadingProgress
-                                                    .expectedTotalBytes!
-                                          : null,
-                                      color: isMe
-                                          ? Colors.white
-                                          : AppTheme.primary,
-                                    ),
-                                  ),
-                                );
-                              },
-                              errorBuilder: (context, error, stackTrace) {
+                                ),
+                              ),
+                              errorWidget: (context, url, error) {
                                 return Container(
                                   constraints: const BoxConstraints(
                                     minHeight: 150,
@@ -244,6 +223,44 @@ class MessageBubble extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// Cached sender avatar — persisted to disk at 96px for offline display.
+  Widget _buildCachedSenderAvatar() {
+    if (senderAvatar == null || senderAvatar!.isEmpty) {
+      return CircleAvatar(
+        radius: 16,
+        backgroundColor: Colors.grey[300],
+        child: Text(
+          sender.isNotEmpty ? sender[0].toUpperCase() : "?",
+          style: const TextStyle(fontSize: 12, color: Colors.black),
+        ),
+      );
+    }
+
+    return CachedNetworkImage(
+      imageUrl: senderAvatar!,
+      maxWidthDiskCache: 96,
+      maxHeightDiskCache: 96,
+      memCacheWidth: 32,
+      memCacheHeight: 32,
+      imageBuilder: (context, imageProvider) => CircleAvatar(
+        radius: 16,
+        backgroundImage: imageProvider,
+      ),
+      placeholder: (context, url) => CircleAvatar(
+        radius: 16,
+        backgroundColor: Colors.grey[300],
+      ),
+      errorWidget: (context, url, error) => CircleAvatar(
+        radius: 16,
+        backgroundColor: Colors.grey[300],
+        child: Text(
+          sender.isNotEmpty ? sender[0].toUpperCase() : "?",
+          style: const TextStyle(fontSize: 12, color: Colors.black),
+        ),
       ),
     );
   }
