@@ -92,13 +92,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           otherUserName: conv.otherUserName,
           otherUserId: conv.otherUserId,
           roomId: roomId,
-          initialHistory: const [], // Pass empty, let ChatScreen fetch it
+          initialHistory: const [],
         ),
       ),
     ).then((_) {
-      // Clear search when coming back
+      // Just clear search — socket keeps the list live in real-time
       _searchController.clear();
-      ref.read(conversationsProvider.notifier).loadChats();
+      if (_searchController.text.isEmpty) {
+        ref.read(conversationsProvider.notifier).loadChats();
+      }
     });
   }
 
@@ -187,7 +189,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
           // 2. UNIFIED LIST
           Expanded(
-            child: convState.isLoading
+            child: convState.conversations.isEmpty && convState.isLoading
                 ? const Center(child: CircularProgressIndicator())
                 : convState.conversations.isEmpty
                 ? const Center(child: Text("No chats found"))

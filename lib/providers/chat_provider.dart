@@ -192,21 +192,27 @@ class ChatController extends Notifier<ChatState> {
                 .toList()
           : <Map<String, dynamic>>[];
 
-      final hydratedHistory = await Future.wait(
-        historyList.map(_hydrateMessageForDisplay),
-      );
-
+      // ── Show messages IMMEDIATELY (raw, before decryption) ──
       state = state.copyWith(
         activeRoomId: incomingRoomId,
-        messages: hydratedHistory,
+        messages: historyList,
         isLoading: false,
         hasMoreMessages: hasMore,
       );
 
-      // Cache server history locally
-      _cacheMessages(hydratedHistory, incomingRoomId);
-
       _socket.emit('conversation:read', {'roomId': incomingRoomId});
+
+      // ── Decrypt E2E messages in background, update incrementally ──
+      final hydratedHistory = await Future.wait(
+        historyList.map(_hydrateMessageForDisplay),
+      );
+
+      // Only update if we're still in the same room
+      if (state.activeRoomId == incomingRoomId) {
+        state = state.copyWith(messages: hydratedHistory);
+      }
+
+      _cacheMessages(hydratedHistory, incomingRoomId);
     };
 
     _moreMessagesHandler = (data) async {

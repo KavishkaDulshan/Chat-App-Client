@@ -28,6 +28,8 @@ final conversationsProvider =
 // THE LOGIC CLASS
 class ConversationsNotifier extends Notifier<ConversationState> {
   bool _isListening = false;
+  // Track last server load time to avoid excessive reloads
+  DateTime? _lastLoadTime;
 
   bool _isE2EMessage(String? content) {
     return content != null && content.startsWith('e2e:v1:');
@@ -54,8 +56,7 @@ class ConversationsNotifier extends Notifier<ConversationState> {
   }
 
   // ──────────────────────────────────────────────────────────────────────────
-  // Helper: decrypt an E2E message preview for the conversation list.
-  // Returns the decrypted text, or null if decryption fails.
+  // Helper: decrypt an E2E message preview — returns null on failure.
   // ──────────────────────────────────────────────────────────────────────────
   Future<String?> _tryDecryptPreview({
     required String ciphertext,
@@ -79,11 +80,19 @@ class ConversationsNotifier extends Notifier<ConversationState> {
   }
 
   // ──────────────────────────────────────────────────────────────────────────
-  // 1. Load History (Default) — Cache-first
+  // 1. Load History — Cache-first, non-blocking refresh
   // ──────────────────────────────────────────────────────────────────────────
-  Future<void> loadChats() async {
-    // Snapshot cached conversations before any server call,
-    // so we can fall back to them if the server is unreachable.
+  Future<void> loadChats({bool forceRefresh = false}) async {
+    // Avoid redundant refreshes — if loaded recently and not forced, skip
+    final now = DateTime.now();
+    if (!forceRefresh &&
+        _lastLoadTime != null &&
+        now.difference(_lastLoadTime!).inSeconds < 15 &&
+        state.conversations.isNotEmpty) {
+      _setupSocketListeners();
+      return;
+    }
+
     List<Conversation> cachedSnapshot = [];
 
     try {
@@ -94,49 +103,37 @@ class ConversationsNotifier extends Notifier<ConversationState> {
           final cached = await db.getAllConversations();
           if (cached.isNotEmpty) {
             cachedSnapshot = cached.map(_cachedConversationToModel).toList();
+            // Show cached data immediately — isLoading stays false so no spinner
             state = ConversationState(
               conversations: cachedSnapshot,
-              isLoading: true, // still fetching from server
+              isLoading: false,
             );
-          } else {
-            state = ConversationState(conversations: [], isLoading: true);
           }
         } catch (e) {
           print('Conv cache read error: $e');
-          state = ConversationState(conversations: [], isLoading: true);
         }
-      } else if (state.conversations.isEmpty) {
-        state = ConversationState(conversations: [], isLoading: true);
       } else {
-        // Already have data from a previous load — keep it as snapshot
         cachedSnapshot = List.from(state.conversations);
       }
 
-      // ── Fetch fresh data from server ──
+      // ── Fetch fresh data from server in background ──
       final rawData = await ref.read(authServiceProvider).getConversations();
 
-      // ── KEY FIX: getConversations() returns [] BOTH when server says
-      // "no conversations" AND when the network call fails (it swallows
-      // errors). If we have cached data and server returned empty, keep
-      // the cached data — the user is likely offline. ──
       if (rawData.isEmpty && cachedSnapshot.isNotEmpty) {
-        state = ConversationState(
-          conversations: cachedSnapshot,
-          isLoading: false,
-        );
+        // Network likely offline — keep cached data
         _setupSocketListeners();
         return;
       }
 
-      List<Conversation> cleanList = rawData
+      List<Conversation> serverList = rawData
           .map((item) => Conversation.fromHistory(item as Map<String, dynamic>))
           .toList();
 
-      // ✅ Decrypt E2E-encrypted last-message previews on the client
+      // ── Decrypt E2E previews ──
       final myUserId = ref.read(authProvider).user?.id;
       if (myUserId != null) {
-        cleanList = await Future.wait(
-          cleanList.map((conv) async {
+        serverList = await Future.wait(
+          serverList.map((conv) async {
             if (conv.lastMessageIsEncrypted && !conv.lastMessageIsDeleted) {
               final decrypted = await _tryDecryptPreview(
                 ciphertext: conv.lastMessage,
@@ -155,18 +152,24 @@ class ConversationsNotifier extends Notifier<ConversationState> {
         );
       }
 
+      // ── MERGE: keep any socket-added conversations not yet in server data ──
+      final serverOtherUserIds = serverList.map((c) => c.otherUserId).toSet();
+      final socketOnlyConvs = state.conversations
+          .where((c) => !serverOtherUserIds.contains(c.otherUserId))
+          .toList();
+
+      final merged = [...socketOnlyConvs, ...serverList];
+
+      _lastLoadTime = now;
       state = ConversationState(
-        conversations: _deduplicate(cleanList),
+        conversations: _deduplicate(merged),
         isLoading: false,
       );
 
-      // ── Write server data to local cache ──
-      _cacheConversations(cleanList);
-
+      _cacheConversations(serverList);
       _setupSocketListeners();
     } catch (e) {
       print("Load Chats Error: $e");
-      // If server fetch fails but we have cached data, keep showing it
       final fallback =
           state.conversations.isNotEmpty ? state.conversations : cachedSnapshot;
       state = ConversationState(
@@ -196,70 +199,49 @@ class ConversationsNotifier extends Notifier<ConversationState> {
   }
 
   // ──────────────────────────────────────────────────────────────────────────
-  // 3. Socket Logic
+  // 3. Socket Logic — IMMEDIATE updates, decrypt in background
   // ──────────────────────────────────────────────────────────────────────────
   void _setupSocketListeners() {
     if (_isListening) return;
 
     final socket = ref.read(socketServiceProvider).socket;
 
-    // A. Handle Incoming Message
-    socket.on('chat_message', (data) async {
+    // A. Handle Incoming Message — NO await, update immediately
+    socket.on('chat_message', (data) {
       final myId = ref.read(authProvider).user?.id;
       if (myId == null) return;
 
       final senderId = data['sender_id'].toString();
       final roomId = data['roomId'].toString();
-      final rawContent = (data['content'] ?? "Sent a message").toString();
-
-      // ✅ Decrypt E2E previews in real-time
-      String content = rawContent;
-      if (_isE2EMessage(rawContent)) {
-        final peerUserId = (senderId == myId)
-            ? _findPeerForRoom(roomId)
-            : senderId;
-
-        if (peerUserId != null && peerUserId.isNotEmpty) {
-          final decrypted = await _tryDecryptPreview(
-            ciphertext: rawContent,
-            myUserId: myId,
-            peerUserId: peerUserId,
-          );
-          if (decrypted != null) {
-            content = decrypted;
-          }
-          // If decryption fails, content stays as raw ciphertext — UI handles
-        }
-      }
-
-      // Format media messages for preview
+      final rawContent = (data['content'] ?? 'Sent a message').toString();
       final type = data['type']?.toString();
+
+      // Determine preview text immediately (no async)
+      String content;
       if (type == 'image') {
         content = '📷 Photo';
       } else if (type == 'audio') {
         content = '🎤 Voice Message';
+      } else if (_isE2EMessage(rawContent)) {
+        // Show placeholder immediately — will decrypt in background below
+        content = '💬 Message';
+      } else {
+        content = rawContent;
       }
 
-      // Create a modifiable copy
-      final List<Conversation> currentList = List.from(state.conversations);
-
-      // LOGIC: Who is the "Other Person"?
+      // --- Determine the peer userId ---
       String targetOtherUserId = '';
-
       if (senderId == myId) {
-        // First, try to find by room ID
-        final indexById = currentList.indexWhere((c) => c.id == roomId);
+        final indexById = state.conversations.indexWhere((c) => c.id == roomId);
         if (indexById != -1) {
-          targetOtherUserId = currentList[indexById].otherUserId;
+          targetOtherUserId = state.conversations[indexById].otherUserId;
         } else {
-          // For brand-new conversations, the room ID is fresh from the server.
-          // Try to find the conversation by peer user ID from the payload.
           final peerIdFromPayload = data['receiver_id']?.toString() ?? '';
           if (peerIdFromPayload.isNotEmpty) {
             targetOtherUserId = peerIdFromPayload;
           } else {
-            // Fall back to reloading the full list from server
-            loadChats();
+            // Unknown room — do a background refresh
+            Future.microtask(() => loadChats(forceRefresh: true));
             return;
           }
         }
@@ -267,94 +249,152 @@ class ConversationsNotifier extends Notifier<ConversationState> {
         targetOtherUserId = senderId;
       }
 
-      // --- UPDATE LOGIC ---
-      final index = currentList.indexWhere(
-        (c) => c.otherUserId == targetOtherUserId,
-      );
-      Conversation? existingConv;
-
-      if (index != -1) {
-        existingConv = currentList.removeAt(index);
-      }
-
-      Conversation updatedConv;
-
-      if (existingConv != null) {
-        updatedConv = existingConv.copyWith(
-          lastMessage: content,
-          lastMessageIsEncrypted: false,
-          time: DateTime.now(),
-        );
-        // Update the room ID if it changed (e.g. temp ID → real MongoDB ID)
-        if (existingConv.id != roomId && roomId.isNotEmpty) {
-          updatedConv = Conversation(
-            id: roomId,
-            otherUserId: updatedConv.otherUserId,
-            otherUserName: updatedConv.otherUserName,
-            otherUserAvatar: updatedConv.otherUserAvatar,
-            isOnline: updatedConv.isOnline,
-            lastMessage: content,
-            lastMessageIsEncrypted: false,
-            updatedAt: DateTime.now(),
-          );
-        }
-      } else {
-        if (senderId == myId) {
-          // Sender created a new chat — build the conversation from payload
-          updatedConv = Conversation(
-            id: roomId,
-            otherUserId: targetOtherUserId,
-            otherUserName: data['receiver_name'] ?? 'User',
-            otherUserAvatar: data['receiver_avatar'],
-            lastMessage: content,
-            updatedAt: DateTime.now(),
-            isOnline: true,
-          );
-        } else {
-          updatedConv = Conversation(
-            id: roomId,
-            otherUserId: senderId,
-            otherUserName: data['sender_name'] ?? 'User',
-            otherUserAvatar: data['sender_avatar'],
-            lastMessage: content,
-            updatedAt: DateTime.now(),
-            isOnline: true,
-          );
-        }
-      }
-
-      currentList.insert(0, updatedConv);
-      state = ConversationState(
-        conversations: _deduplicate(currentList),
-        isLoading: false,
+      _applyMessageToList(
+        roomId: roomId,
+        targetOtherUserId: targetOtherUserId,
+        content: content,
+        data: data,
+        senderId: senderId,
+        myId: myId,
       );
 
-      // Update the local cache with the new last message
-      if (updatedConv.id.isNotEmpty) {
-        final db = ref.read(localDbProvider);
-        db?.updateConversationLastMessage(
-          conversationId: updatedConv.id,
-          lastMessage: content,
-          lastMessageType: 'text',
-          lastMessageIsDeleted: false,
-          updatedAt: DateTime.now(),
+      // --- Background decrypt for E2E text messages ---
+      if (type == 'text' && _isE2EMessage(rawContent)) {
+        _decryptAndUpdatePreview(
+          roomId: roomId,
+          rawContent: rawContent,
+          myId: myId,
+          peerUserId: targetOtherUserId,
         );
       }
-
     });
 
     // B. Handle Online Status
     socket.on('user_status_change', (data) {
-      final List<Conversation> currentList = state.conversations.map((c) {
+      final updated = state.conversations.map((c) {
         if (c.otherUserId == data['userId']) {
           return c.copyWith(isOnline: data['isOnline']);
         }
         return c;
       }).toList();
-      state = ConversationState(conversations: currentList, isLoading: false);
+      state = ConversationState(conversations: updated, isLoading: false);
     });
 
     _isListening = true;
+  }
+
+  /// Apply a new/updated message to the conversation list immediately.
+  void _applyMessageToList({
+    required String roomId,
+    required String targetOtherUserId,
+    required String content,
+    required Map data,
+    required String senderId,
+    required String myId,
+  }) {
+    final currentList = List<Conversation>.from(state.conversations);
+
+    final index = currentList.indexWhere(
+      (c) => c.otherUserId == targetOtherUserId,
+    );
+    Conversation? existingConv;
+    if (index != -1) {
+      existingConv = currentList.removeAt(index);
+    }
+
+    Conversation updatedConv;
+    if (existingConv != null) {
+      // Update room ID if it changed (temp → real MongoDB ID)
+      if (existingConv.id != roomId && roomId.isNotEmpty) {
+        updatedConv = Conversation(
+          id: roomId,
+          otherUserId: existingConv.otherUserId,
+          otherUserName: existingConv.otherUserName,
+          otherUserAvatar: existingConv.otherUserAvatar,
+          isOnline: existingConv.isOnline,
+          lastMessage: content,
+          lastMessageIsEncrypted: false,
+          updatedAt: DateTime.now(),
+        );
+      } else {
+        updatedConv = existingConv.copyWith(
+          lastMessage: content,
+          lastMessageIsEncrypted: false,
+          time: DateTime.now(),
+        );
+      }
+    } else {
+      // Brand-new conversation
+      if (senderId == myId) {
+        updatedConv = Conversation(
+          id: roomId,
+          otherUserId: targetOtherUserId,
+          otherUserName: data['receiver_name'] ?? 'User',
+          otherUserAvatar: data['receiver_avatar']?.toString(),
+          lastMessage: content,
+          updatedAt: DateTime.now(),
+          isOnline: true,
+        );
+      } else {
+        updatedConv = Conversation(
+          id: roomId,
+          otherUserId: senderId,
+          otherUserName: data['sender_name'] ?? 'User',
+          otherUserAvatar: data['sender_avatar']?.toString(),
+          lastMessage: content,
+          updatedAt: DateTime.now(),
+          isOnline: true,
+        );
+      }
+    }
+
+    currentList.insert(0, updatedConv);
+    state = ConversationState(
+      conversations: _deduplicate(currentList),
+      isLoading: false,
+    );
+
+    // Update local cache
+    if (updatedConv.id.isNotEmpty) {
+      final db = ref.read(localDbProvider);
+      db?.updateConversationLastMessage(
+        conversationId: updatedConv.id,
+        lastMessage: content,
+        lastMessageType: 'text',
+        lastMessageIsDeleted: false,
+        updatedAt: DateTime.now(),
+      );
+    }
+  }
+
+  /// Decrypt E2E preview in background and update the conversation list entry.
+  Future<void> _decryptAndUpdatePreview({
+    required String roomId,
+    required String rawContent,
+    required String myId,
+    required String peerUserId,
+  }) async {
+    if (peerUserId.isEmpty) return;
+    final decrypted = await _tryDecryptPreview(
+      ciphertext: rawContent,
+      myUserId: myId,
+      peerUserId: peerUserId,
+    );
+    if (decrypted == null) return;
+
+    // Find the conversation and update its preview
+    final currentList = List<Conversation>.from(state.conversations);
+    final idx = currentList.indexWhere((c) => c.id == roomId || c.otherUserId == peerUserId);
+    if (idx == -1) return;
+
+    currentList[idx] = currentList[idx].copyWith(
+      lastMessage: decrypted,
+      lastMessageIsEncrypted: false,
+    );
+    state = ConversationState(
+      conversations: currentList,
+      isLoading: false,
+    );
   }
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -379,9 +419,7 @@ class ConversationsNotifier extends Notifier<ConversationState> {
   List<Conversation> _deduplicate(List<Conversation> input) {
     final seen = <String>{};
     return input.where((conv) {
-      if (seen.contains(conv.otherUserId)) {
-        return false;
-      }
+      if (seen.contains(conv.otherUserId)) return false;
       seen.add(conv.otherUserId);
       return true;
     }).toList();
@@ -391,11 +429,9 @@ class ConversationsNotifier extends Notifier<ConversationState> {
   // LOCAL DB CACHE HELPERS
   // ──────────────────────────────────────────────────────────────────────────
 
-  /// Fire-and-forget: write conversations to local cache.
   void _cacheConversations(List<Conversation> conversations) {
     final db = ref.read(localDbProvider);
     if (db == null) return;
-
     try {
       final companions = conversations
           .where((c) => c.id.isNotEmpty)
@@ -410,7 +446,6 @@ class ConversationsNotifier extends Notifier<ConversationState> {
                 updatedAt: Value(c.updatedAt),
               ))
           .toList();
-
       if (companions.isNotEmpty) {
         db.upsertConversations(companions);
       }
@@ -419,7 +454,6 @@ class ConversationsNotifier extends Notifier<ConversationState> {
     }
   }
 
-  /// Convert a Drift CachedConversation → Conversation model for the UI.
   Conversation _cachedConversationToModel(CachedConversation c) {
     return Conversation(
       id: c.id,
