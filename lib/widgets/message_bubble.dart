@@ -2,7 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import '../app_theme.dart';
 import '../screens/full_screen_image.dart';
-import 'audio_bubble.dart'; // ✅ Import the AudioBubble widget
+import 'audio_bubble.dart';
 
 class MessageBubble extends StatelessWidget {
   final String sender;
@@ -12,7 +12,6 @@ class MessageBubble extends StatelessWidget {
   final bool isMe;
   final String type;
   final String status;
-  // Note: If you add 'duration' to your message model later, pass it here too.
 
   const MessageBubble({
     super.key,
@@ -27,28 +26,29 @@ class MessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxBubbleWidth = constraints.maxWidth * 0.75;
+        return _buildBubble(context, maxBubbleWidth);
+      },
+    );
+  }
+
+  Widget _buildBubble(BuildContext context, double maxBubbleWidth) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       child: Row(
-        mainAxisAlignment: isMe
-            ? MainAxisAlignment.end
-            : MainAxisAlignment.start,
+        mainAxisAlignment: isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          // 1. SHOW AVATAR (Only for other users)
           if (!isMe) ...[
             _buildCachedSenderAvatar(),
             const SizedBox(width: 8),
           ],
-
-          // 2. MESSAGE CONTENT
           Flexible(
             child: Column(
-              crossAxisAlignment: isMe
-                  ? CrossAxisAlignment.end
-                  : CrossAxisAlignment.start,
+              crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
               children: [
-                // Sender Name (Only if not me)
                 if (!isMe)
                   Padding(
                     padding: const EdgeInsets.only(left: 4, bottom: 4),
@@ -57,157 +57,30 @@ class MessageBubble extends StatelessWidget {
                       style: const TextStyle(fontSize: 12, color: Colors.grey),
                     ),
                   ),
-
-                // The Bubble
                 ClipRRect(
-                  borderRadius: BorderRadius.only(
-                    topLeft: const Radius.circular(16),
-                    topRight: const Radius.circular(16),
-                    bottomLeft: isMe
-                        ? const Radius.circular(16)
-                        : const Radius.circular(4),
-                    bottomRight: isMe
-                        ? const Radius.circular(4)
-                        : const Radius.circular(16),
-                  ),
+                  borderRadius: _bubbleRadius(),
                   child: Container(
                     constraints: BoxConstraints(
-                      maxWidth: MediaQuery.of(context).size.width * 0.75,
-                      maxHeight: MediaQuery.of(context).size.height * 0.6,
+                      maxWidth: maxBubbleWidth,
+                      maxHeight: 600,
                     ),
-                    padding: type == 'image' ? EdgeInsets.zero : const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
+                    padding: type == 'image'
+                        ? EdgeInsets.zero
+                        : const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                     decoration: BoxDecoration(
                       color: isMe ? AppTheme.myMessageColor : AppTheme.otherMessageColor,
                       border: isMe ? null : Border.all(color: const Color(0xFFE2E8F0), width: 1),
-                      borderRadius: BorderRadius.only(
-                        topLeft: const Radius.circular(16),
-                        topRight: const Radius.circular(16),
-                        bottomLeft: isMe
-                            ? const Radius.circular(16)
-                            : const Radius.circular(4),
-                        bottomRight: isMe
-                            ? const Radius.circular(4)
-                            : const Radius.circular(16),
-                      ),
+                      borderRadius: _bubbleRadius(),
                     ),
-                    // ✅ UPDATED LOGIC HERE
-                    child: type == 'image'
-                      ? GestureDetector(
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => FullScreenImage(imageUrl: text),
-                              ),
-                            );
-                          },
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(12),
-                            child: CachedNetworkImage(
-                              imageUrl: text,
-                              maxWidthDiskCache: 800,
-                              maxHeightDiskCache: 800,
-                              fit: BoxFit.contain,
-                              placeholder: (ctx, url) => Container(
-                                constraints: const BoxConstraints(
-                                  minHeight: 150,
-                                  minWidth: 150,
-                                ),
-                                child: Center(
-                                  child: CircularProgressIndicator(
-                                    color: isMe
-                                        ? Colors.white
-                                        : AppTheme.primary,
-                                  ),
-                                ),
-                              ),
-                              errorWidget: (context, url, error) {
-                                return Container(
-                                  constraints: const BoxConstraints(
-                                    minHeight: 150,
-                                    minWidth: 150,
-                                  ),
-                                  child: const Center(
-                                    child: Icon(
-                                      Icons.broken_image,
-                                      size: 40,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                );
-                              },
-                            ),
-                          ),
-                        )
-                      : type == 'audio' // ✅ Check for Audio
-                      ? Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 12,
-                          ),
-                          child: AudioBubble(
-                            url: text, // 'text' field contains the Audio URL
-                            isMe: isMe,
-                            // If you update your DB to store duration, pass it here:
-                            // duration: duration,
-                          ),
-                        )
-                      : Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 12,
-                          ),
-                          // Safety: if raw E2E ciphertext leaked through,
-                          // show a lock icon instead of raw gibberish.
-                          child: text.startsWith('e2e:v1:')
-                              ? Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      Icons.lock_outline,
-                                      size: 16,
-                                      color: isMe
-                                          ? Colors.white70
-                                          : Colors.grey,
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      'Encrypted message',
-                                      style: TextStyle(
-                                        color: isMe
-                                            ? Colors.white70
-                                            : Colors.grey,
-                                        fontSize: 14,
-                                        fontStyle: FontStyle.italic,
-                                      ),
-                                    ),
-                                  ],
-                                )
-                              : Text(
-                                  text,
-                                  style: TextStyle(
-                                    color: isMe ? Colors.white : AppTheme.textPrimary,
-                                    fontSize: 15,
-                                    height: 1.4,
-                                  ),
-                                ),
-                        ),
+                    child: _buildContent(context),
+                  ),
                 ),
-                ),
-
-                // Time & Status
                 Padding(
                   padding: const EdgeInsets.only(top: 4, right: 4),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        time,
-                        style: TextStyle(fontSize: 10, color: Colors.grey[500]),
-                      ),
+                      Text(time, style: TextStyle(fontSize: 10, color: Colors.grey[500])),
                       if (isMe) ...[
                         const SizedBox(width: 4),
                         Icon(
@@ -223,6 +96,78 @@ class MessageBubble extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  BorderRadius _bubbleRadius() {
+    return BorderRadius.only(
+      topLeft: const Radius.circular(16),
+      topRight: const Radius.circular(16),
+      bottomLeft: isMe ? const Radius.circular(16) : const Radius.circular(4),
+      bottomRight: isMe ? const Radius.circular(4) : const Radius.circular(16),
+    );
+  }
+
+  Widget _buildContent(BuildContext context) {
+    if (type == 'image') {
+      return GestureDetector(
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => FullScreenImage(imageUrl: text)),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: CachedNetworkImage(
+            imageUrl: text,
+            maxWidthDiskCache: 800,
+            maxHeightDiskCache: 800,
+            fit: BoxFit.contain,
+            placeholder: (ctx, url) => const SizedBox(
+              width: 150, height: 150,
+              child: Center(child: CircularProgressIndicator()),
+            ),
+            errorWidget: (ctx, url, err) => const SizedBox(
+              width: 150, height: 150,
+              child: Center(child: Icon(Icons.broken_image, size: 40, color: Colors.white)),
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (type == 'audio') {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: AudioBubble(url: text, isMe: isMe),
+      );
+    }
+
+    // Text message
+    if (text.startsWith('e2e:v1:')) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.lock_outline, size: 16, color: isMe ? Colors.white70 : Colors.grey),
+          const SizedBox(width: 6),
+          Text(
+            'Encrypted message',
+            style: TextStyle(
+              color: isMe ? Colors.white70 : Colors.grey,
+              fontSize: 14,
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Text(
+      text,
+      style: TextStyle(
+        color: isMe ? Colors.white : AppTheme.textPrimary,
+        fontSize: 15,
+        height: 1.4,
       ),
     );
   }

@@ -39,17 +39,18 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   @override
   void initState() {
     super.initState();
-    // ✅ CRITICAL FIX:
-    // Connect to the socket ONLY when the screen is ready.
-    // This prevents "Missing History" race conditions.
     Future.microtask(() {
       ref
           .read(chatProvider.notifier)
           .joinChat(widget.roomId, widget.otherUserId, widget.initialHistory);
     });
-
-    // BUG-1: Listen for scroll-to-top to load older messages
     _scrollController.addListener(_onScroll);
+  }
+
+  // Placed in didChangeDependencies so it's only registered once
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
   }
 
   void _onScroll() {
@@ -114,11 +115,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final chatState = ref.watch(chatProvider);
     final myUserId = ref.watch(authProvider).user?.id;
 
-    // Auto-scroll when new messages arrive
-    ref.listen(chatProvider, (previous, next) {
-      if (next.messages.length > (previous?.messages.length ?? 0) &&
-          !next.isLoadingMore) {
-        Future.delayed(const Duration(milliseconds: 100), _scrollToBottom);
+    // Auto-scroll when new messages arrive (registered once via listen, not in build)
+    ref.listen<ChatState>(chatProvider, (previous, next) {
+      final prevLen = previous?.messages.length ?? 0;
+      if (next.messages.length > prevLen && !next.isLoadingMore) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
       }
     });
 
@@ -167,67 +168,72 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                     ),
                   ),
                 Expanded(
-                  child: ListView.builder(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 20),
-                    itemCount: chatState.messages.length,
-                    itemBuilder: (context, index) {
-                      final msg = chatState.messages[index];
-                      final isMe = msg['sender_id'] == myUserId;
-                      final isDeleted = msg['isDeleted'] == true;
+                  child: chatState.isLoading && chatState.messages.isEmpty
+                    ? const Center(child: CircularProgressIndicator())
+                    : ListView.builder(
+                        controller: _scrollController,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 20),
+                        itemCount: chatState.messages.length,
+                        itemBuilder: (context, index) {
+                          final msg = chatState.messages[index];
+                          final isMe = msg['sender_id'] == myUserId;
+                          final isDeleted = msg['isDeleted'] == true;
 
-                      // Handle Deleted Message UI
-                      if (isDeleted) {
-                        return Align(
-                          alignment: isMe
-                              ? Alignment.centerRight
-                              : Alignment.centerLeft,
-                          child: Container(
-                            margin: const EdgeInsets.symmetric(vertical: 5),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 8,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.grey[200],
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: const [
-                                Icon(Icons.block, size: 14, color: Colors.grey),
-                                SizedBox(width: 5),
-                                Text(
-                                  "This message was deleted",
-                                  style: TextStyle(
-                                    color: Colors.grey,
-                                    fontStyle: FontStyle.italic,
-                                    fontSize: 13,
+                          if (isDeleted) {
+                            return RepaintBoundary(
+                              child: Align(
+                                alignment: isMe
+                                    ? Alignment.centerRight
+                                    : Alignment.centerLeft,
+                                child: Container(
+                                  margin: const EdgeInsets.symmetric(vertical: 5),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 8,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.grey[200],
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: const [
+                                      Icon(Icons.block, size: 14, color: Colors.grey),
+                                      SizedBox(width: 5),
+                                      Text(
+                                        "This message was deleted",
+                                        style: TextStyle(
+                                          color: Colors.grey,
+                                          fontStyle: FontStyle.italic,
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
-                              ],
-                            ),
-                          ),
-                        );
-                      }
+                              ),
+                            );
+                          }
 
-                      return GestureDetector(
-                        onLongPress: isMe
-                            ? () => _handleDeleteMessage(context, msg['_id'])
-                            : null,
-                        child: MessageBubble(
-                          sender: msg['sender_name'] ?? 'Unknown',
-                          senderAvatar: msg['sender_avatar'],
-                          text: msg['content'] ?? '',
-                          time: _formatTime(msg['timestamp']),
-                          isMe: isMe,
-                          type: msg['type'] ?? 'text',
-                          status: msg['status'] ?? 'sent',
-                        ),
-                      );
-                    },
-                  ),
+                          return RepaintBoundary(
+                            child: GestureDetector(
+                              onLongPress: isMe
+                                  ? () => _handleDeleteMessage(context, msg['_id'])
+                                  : null,
+                              child: MessageBubble(
+                                key: ValueKey(msg['_id']),
+                                sender: msg['sender_name'] ?? 'Unknown',
+                                senderAvatar: msg['sender_avatar'],
+                                text: msg['content'] ?? '',
+                                time: _formatTime(msg['timestamp']),
+                                isMe: isMe,
+                                type: msg['type'] ?? 'text',
+                                status: msg['status'] ?? 'sent',
+                              ),
+                            ),
+                          );
+                        },
+                      ),
                 ),
               ],
             ),

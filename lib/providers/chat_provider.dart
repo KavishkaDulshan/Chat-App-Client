@@ -72,6 +72,8 @@ class ChatController extends Notifier<ChatState> {
   String? _peerPublicKey;
   bool _isListening = false;
 
+  bool _isE2EContent(String content) => content.startsWith('e2e:v1:');
+
   late Function(dynamic) _messageHandler;
   late Function(dynamic) _typingHandler;
   late Function(dynamic) _stopTypingHandler;
@@ -109,15 +111,15 @@ class ChatController extends Notifier<ChatState> {
     List<Map<String, dynamic>> initialHistory,
   ) async {
     _activeOtherUserId = otherUserId;
-    _peerPublicKey = await _fetchPeerPublicKey(otherUserId);
 
+    // ── Show loading state immediately ──
     state = state.copyWith(
       activeRoomId: roomId,
-      messages: List.from(initialHistory),
+      messages: const [],
       isLoading: true,
     );
 
-    // ── Cache-first: load from local DB instantly ──
+    // ── Load cached messages instantly (already decrypted from last session) ──
     final db = ref.read(localDbProvider);
     if (db != null) {
       try {
@@ -127,13 +129,18 @@ class ChatController extends Notifier<ChatState> {
           state = state.copyWith(
             activeRoomId: roomId,
             messages: cachedMaps,
-            isLoading: true, // still loading from server
+            isLoading: false, // Show cached data immediately — no spinner
           );
         }
       } catch (e) {
         print('Cache read error: $e');
       }
     }
+
+    // ── Fetch peer key in parallel (don't block showing cache) ──
+    _fetchPeerPublicKey(otherUserId).then((key) {
+      _peerPublicKey = key;
+    });
 
     _attachListeners();
     _socket.emit('join_private_chat', otherUserId);
@@ -168,11 +175,27 @@ class ChatController extends Notifier<ChatState> {
       if (incomingRoomId != state.activeRoomId) return;
       if (state.messages.any((msg) => msg['_id'] == incoming['_id'])) return;
 
-      final hydrated = await _hydrateMessageForDisplay(incoming);
-      state = state.copyWith(messages: [...state.messages, hydrated]);
+      // Show immediately with optimistic content (no wait)
+      final type = (incoming['type'] ?? 'text').toString();
+      final rawContent = (incoming['content'] ?? '').toString();
+      final needsDecrypt = type == 'text' && _isE2EContent(rawContent);
 
-      // Cache the new message locally
-      _cacheMessages([hydrated], incomingRoomId);
+      if (needsDecrypt) {
+        // Add immediately with placeholder, then update with decrypted
+        final placeholder = {...incoming, 'content': '💬 ...' };
+        state = state.copyWith(messages: [...state.messages, placeholder]);
+        final hydrated = await _hydrateMessageForDisplay(incoming);
+        // Replace placeholder with decrypted
+        final updated = state.messages.map((m) =>
+          m['_id'] == hydrated['_id'] ? hydrated : m
+        ).toList();
+        state = state.copyWith(messages: updated);
+        _cacheMessages([hydrated], incomingRoomId);
+      } else {
+        final hydrated = await _hydrateMessageForDisplay(incoming);
+        state = state.copyWith(messages: [...state.messages, hydrated]);
+        _cacheMessages([hydrated], incomingRoomId);
+      }
 
       if (incoming['sender_id'] != myUserId) {
         _socket.emit('conversation:read', {'roomId': state.activeRoomId});
@@ -192,24 +215,32 @@ class ChatController extends Notifier<ChatState> {
                 .toList()
           : <Map<String, dynamic>>[];
 
-      // ── Show messages IMMEDIATELY (raw, before decryption) ──
+      // ── Do NOT replace cached messages with raw server ciphertext ──
+      // Just update hasMore and mark loading done. Decrypt in background.
       state = state.copyWith(
         activeRoomId: incomingRoomId,
-        messages: historyList,
-        isLoading: false,
         hasMoreMessages: hasMore,
+        isLoading: false,
       );
 
       _socket.emit('conversation:read', {'roomId': incomingRoomId});
 
-      // ── Decrypt E2E messages in background, update incrementally ──
+      // Wait for peer key if not yet available (fetched in parallel in joinChat)
+      if (_peerPublicKey == null && _activeOtherUserId.isNotEmpty) {
+        _peerPublicKey = await _fetchPeerPublicKey(_activeOtherUserId);
+      }
+
+      // Decrypt all messages
       final hydratedHistory = await Future.wait(
         historyList.map(_hydrateMessageForDisplay),
       );
 
-      // Only update if we're still in the same room
+      // Only update if still in same room
       if (state.activeRoomId == incomingRoomId) {
-        state = state.copyWith(messages: hydratedHistory);
+        state = state.copyWith(
+          messages: hydratedHistory,
+          isLoading: false,
+        );
       }
 
       _cacheMessages(hydratedHistory, incomingRoomId);
