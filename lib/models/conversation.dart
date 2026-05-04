@@ -1,16 +1,19 @@
 class Conversation {
-  final String id; // The Room ID
+  final String id;
   final String otherUserId;
   final String otherUserName;
   final String? otherUserAvatar;
   final bool isOnline;
   final String lastMessage;
   final bool lastMessageIsDeleted;
-  // ✅ Track whether the last message preview is still an E2E ciphertext
-  // (i.e., not yet decrypted on the client side)
   final bool lastMessageIsEncrypted;
   final DateTime? updatedAt;
   final int unreadCount;
+  /// 'none' | 'pending_sent' | 'pending_received' | 'contacts'
+  /// Only populated for search results; real conversations default to 'contacts'.
+  final String contactStatus;
+  /// Only populated for pending_received — the request ID needed to accept/decline
+  final String? pendingRequestId;
 
   Conversation({
     required this.id,
@@ -23,6 +26,8 @@ class Conversation {
     this.lastMessageIsEncrypted = false,
     this.updatedAt,
     this.unreadCount = 0,
+    this.contactStatus = 'contacts',
+    this.pendingRequestId,
   });
 
   // Factory: Converts API /conversations/:id response
@@ -50,22 +55,25 @@ class Conversation {
   // Factory: Converts API /search response
   factory Conversation.fromSearch(Map<String, dynamic> userJson) {
     return Conversation(
-      id: '', // Room ID is unknown until we click "Chat"
+      id: '',
       otherUserId: userJson['_id'] ?? userJson['id'],
       otherUserName: userJson['username'],
       otherUserAvatar: userJson['profile_pic'],
       isOnline: userJson['is_online'] == true,
-      lastMessage: 'Tap to chat', // Default text for search results
+      lastMessage: 'Tap to chat',
+      contactStatus: userJson['contactStatus']?.toString() ?? 'none',
+      pendingRequestId: userJson['pendingRequestId']?.toString(),
     );
   }
 
-  // Helper: Create a copy with updated status (Optimization for immutability)
   Conversation copyWith({
     bool? isOnline,
     String? lastMessage,
     bool? lastMessageIsDeleted,
     bool? lastMessageIsEncrypted,
     DateTime? time,
+    String? contactStatus,
+    String? pendingRequestId,
   }) {
     return Conversation(
       id: id,
@@ -79,6 +87,8 @@ class Conversation {
           lastMessageIsEncrypted ?? this.lastMessageIsEncrypted,
       updatedAt: time ?? updatedAt,
       unreadCount: unreadCount,
+      contactStatus: contactStatus ?? this.contactStatus,
+      pendingRequestId: pendingRequestId ?? this.pendingRequestId,
     );
   }
 }
