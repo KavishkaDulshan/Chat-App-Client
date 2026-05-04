@@ -59,7 +59,7 @@ class _ChatAppState extends ConsumerState<ChatApp> {
         scaffoldBackgroundColor: const Color(0xFF0F172A),
         colorScheme: const ColorScheme.dark(),
       ),
-      home: authState.isLoading
+      home: authState.isInitializing
           ? const _SplashLoadingScreen()
           : authState.user != null
               ? const HomeScreen()

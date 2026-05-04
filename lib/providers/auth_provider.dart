@@ -8,9 +8,15 @@ import '../providers/local_db_provider.dart';
 class AuthState {
   final User? user;
   final bool isLoading;
+  final bool isInitializing;
   final String? errorMessage;
 
-  AuthState({this.user, this.isLoading = false, this.errorMessage});
+  AuthState({
+    this.user,
+    this.isLoading = false,
+    this.isInitializing = false,
+    this.errorMessage,
+  });
 }
 
 final authProvider = NotifierProvider<AuthController, AuthState>(
@@ -59,7 +65,7 @@ class AuthController extends Notifier<AuthState> {
 
   @override
   AuthState build() {
-    return AuthState(isLoading: true);
+    return AuthState(isInitializing: true);
   }
 
   // Helper to connect socket
@@ -77,7 +83,7 @@ class AuthController extends Notifier<AuthState> {
   }
 
   Future<void> checkAuthStatus() async {
-    state = AuthState(isLoading: true);
+    state = AuthState(isInitializing: true);
     final authService = ref.read(authServiceProvider);
     final user = await authService.tryAutoLogin();
 
@@ -93,7 +99,7 @@ class AuthController extends Notifier<AuthState> {
         _bootstrapE2EE(user), // uses cached backup key from secure storage
       ]);
     } else {
-      state = AuthState(isLoading: false);
+      state = AuthState(isInitializing: false, isLoading: false);
     }
   }
 
@@ -107,7 +113,7 @@ class AuthController extends Notifier<AuthState> {
       await _bootstrapE2EE(user, password: password);
       _connectSocket(user);
       await _initLocalDatabase(user);
-      state = AuthState(user: user, isLoading: false);
+      state = AuthState(user: user, isLoading: false, isInitializing: false);
     } else {
       state = AuthState(
         isLoading: false,
