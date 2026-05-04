@@ -273,6 +273,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   Expanded(
                     child: TextField(
                       controller: _messageController,
+                      style: const TextStyle(color: AppTheme.textPrimary, fontSize: 15),
                       onChanged: (text) {
                         setState(() {}); // Toggle Mic/Send button
                         ref.read(chatProvider.notifier).sendTypingEvent(text);
