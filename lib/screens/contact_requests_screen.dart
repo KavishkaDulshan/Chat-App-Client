@@ -18,47 +18,63 @@ class _ContactRequestsScreenState extends ConsumerState<ContactRequestsScreen> {
   Widget build(BuildContext context) {
     final contactState = ref.watch(contactProvider);
 
-    return Scaffold(
-      backgroundColor: AppTheme.background,
-      appBar: AppBar(
-        title: const Text(
-          'Contact Requests',
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontWeight: FontWeight.bold,
-            fontSize: 20,
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
+        backgroundColor: AppTheme.background,
+        appBar: AppBar(
+          title: const Text(
+            'Contact Requests',
+            style: TextStyle(
+              color: AppTheme.textPrimary,
+              fontWeight: FontWeight.bold,
+              fontSize: 20,
+            ),
+          ),
+          backgroundColor: AppTheme.background,
+          elevation: 0,
+          iconTheme: const IconThemeData(color: AppTheme.textPrimary),
+          bottom: const TabBar(
+            labelColor: AppTheme.primary,
+            unselectedLabelColor: AppTheme.textSecondary,
+            indicatorColor: AppTheme.primary,
+            tabs: [
+              Tab(text: 'Received'),
+              Tab(text: 'Sent'),
+            ],
           ),
         ),
-        backgroundColor: AppTheme.background,
-        elevation: 0,
-        iconTheme: const IconThemeData(color: AppTheme.textPrimary),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(1),
-          child: Container(color: const Color(0xFFE2E8F0), height: 1),
-        ),
+        body: contactState.isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : TabBarView(
+                children: [
+                  _buildList(contactState.incomingRequests, true),
+                  _buildList(contactState.outgoingRequests, false),
+                ],
+              ),
       ),
-      body: contactState.isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : contactState.pendingRequests.isEmpty
-              ? _buildEmptyState()
-              : RefreshIndicator(
-                  onRefresh: () =>
-                      ref.read(contactProvider.notifier).loadPendingRequests(),
-                  child: ListView.separated(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 20, vertical: 16),
-                    itemCount: contactState.pendingRequests.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 12),
-                    itemBuilder: (context, index) {
-                      final req = contactState.pendingRequests[index];
-                      return _buildRequestTile(req);
-                    },
-                  ),
-                ),
     );
   }
 
-  Widget _buildEmptyState() {
+  Widget _buildList(List<ContactRequest> requests, bool isIncoming) {
+    if (requests.isEmpty) {
+      return _buildEmptyState(isIncoming);
+    }
+    return RefreshIndicator(
+      onRefresh: () => ref.read(contactProvider.notifier).loadPendingRequests(),
+      child: ListView.separated(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        itemCount: requests.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 12),
+        itemBuilder: (context, index) {
+          final req = requests[index];
+          return _buildRequestTile(req, isIncoming);
+        },
+      ),
+    );
+  }
+
+  Widget _buildEmptyState(bool isIncoming) {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -69,33 +85,39 @@ class _ContactRequestsScreenState extends ConsumerState<ContactRequestsScreen> {
               color: AppTheme.primary.withOpacity(0.06),
               shape: BoxShape.circle,
             ),
-            child: const Icon(
-              Icons.person_add_alt_1_outlined,
+            child: Icon(
+              isIncoming ? Icons.person_add_alt_1_outlined : Icons.send_outlined,
               size: 56,
               color: AppTheme.primary,
             ),
           ),
           const SizedBox(height: 20),
-          const Text(
-            'No pending requests',
-            style: TextStyle(
+          Text(
+            isIncoming ? 'No pending requests' : 'No sent requests',
+            style: const TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.w600,
               color: AppTheme.textPrimary,
             ),
           ),
           const SizedBox(height: 8),
-          const Text(
-            'When someone sends you a contact\nrequest, it will appear here.',
+          Text(
+            isIncoming
+                ? 'When someone sends you a contact\nrequest, it will appear here.'
+                : 'Pending requests you have sent\nwill appear here.',
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 14, color: AppTheme.textSecondary),
+            style: const TextStyle(fontSize: 14, color: AppTheme.textSecondary),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildRequestTile(ContactRequest req) {
+  Widget _buildRequestTile(ContactRequest req, bool isIncoming) {
+    final name = isIncoming ? (req.fromUsername ?? 'Unknown') : (req.toUsername ?? 'Unknown');
+    final avatar = isIncoming ? req.fromAvatar : req.toAvatar;
+    final isOnline = isIncoming ? (req.fromIsOnline ?? false) : (req.toIsOnline ?? false);
+
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -116,8 +138,8 @@ class _ContactRequestsScreenState extends ConsumerState<ContactRequestsScreen> {
             // Avatar
             Stack(
               children: [
-                _buildAvatar(req.fromAvatar, req.fromUsername),
-                if (req.fromIsOnline)
+                _buildAvatar(avatar, name),
+                if (isOnline)
                   Positioned(
                     right: 0,
                     bottom: 0,
@@ -141,7 +163,7 @@ class _ContactRequestsScreenState extends ConsumerState<ContactRequestsScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    req.fromUsername,
+                    name,
                     style: const TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 16,
@@ -149,9 +171,9 @@ class _ContactRequestsScreenState extends ConsumerState<ContactRequestsScreen> {
                     ),
                   ),
                   const SizedBox(height: 3),
-                  const Text(
-                    'Wants to connect with you',
-                    style: TextStyle(
+                  Text(
+                    isIncoming ? 'Wants to connect with you' : 'Waiting for approval',
+                    style: const TextStyle(
                       fontSize: 13,
                       color: AppTheme.textSecondary,
                     ),
@@ -162,7 +184,9 @@ class _ContactRequestsScreenState extends ConsumerState<ContactRequestsScreen> {
             const SizedBox(width: 8),
 
             // Action buttons
-            _AcceptDeclineButtons(req: req),
+            isIncoming
+                ? _AcceptDeclineButtons(req: req)
+                : _CancelButton(req: req),
           ],
         ),
       ),
@@ -206,6 +230,56 @@ class _ContactRequestsScreenState extends ConsumerState<ContactRequestsScreen> {
   }
 }
 
+class _CancelButton extends ConsumerStatefulWidget {
+  final ContactRequest req;
+  const _CancelButton({required this.req});
+
+  @override
+  ConsumerState<_CancelButton> createState() => _CancelButtonState();
+}
+
+class _CancelButtonState extends ConsumerState<_CancelButton> {
+  bool _isLoading = false;
+
+  Future<void> _cancel() async {
+    setState(() => _isLoading = true);
+    await ref
+        .read(contactProvider.notifier)
+        .declineRequest(widget.req.id, widget.req.toUserId ?? '');
+    if (mounted) setState(() => _isLoading = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const SizedBox(
+        width: 24,
+        height: 24,
+        child: CircularProgressIndicator(strokeWidth: 2),
+      );
+    }
+    return GestureDetector(
+      onTap: _cancel,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.red.shade50,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.red.shade200),
+        ),
+        child: const Text(
+          'Cancel',
+          style: TextStyle(
+            color: Colors.redAccent,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _AcceptDeclineButtons extends ConsumerStatefulWidget {
   final ContactRequest req;
   const _AcceptDeclineButtons({required this.req});
@@ -222,7 +296,7 @@ class _AcceptDeclineButtonsState extends ConsumerState<_AcceptDeclineButtons> {
     setState(() => _isLoading = true);
     final ok = await ref
         .read(contactProvider.notifier)
-        .acceptRequest(widget.req.requestId, widget.req.fromUserId);
+        .acceptRequest(widget.req.id, widget.req.fromUserId ?? '');
     if (mounted) {
       setState(() => _isLoading = false);
       ScaffoldMessenger.of(context).showSnackBar(
@@ -240,7 +314,7 @@ class _AcceptDeclineButtonsState extends ConsumerState<_AcceptDeclineButtons> {
     setState(() => _isLoading = true);
     await ref
         .read(contactProvider.notifier)
-        .declineRequest(widget.req.requestId);
+        .declineRequest(widget.req.id, widget.req.fromUserId ?? '');
     if (mounted) setState(() => _isLoading = false);
   }
 

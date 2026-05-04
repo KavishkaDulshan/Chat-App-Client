@@ -529,6 +529,16 @@ class _ContactActionButtonState extends ConsumerState<_ContactActionButton> {
     _status = widget.conv.contactStatus;
   }
 
+  @override
+  void didUpdateWidget(covariant _ContactActionButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.conv.contactStatus != widget.conv.contactStatus) {
+      setState(() {
+        _status = widget.conv.contactStatus;
+      });
+    }
+  }
+
   Future<void> _sendRequest() async {
     setState(() => _isLoading = true);
     final result = await ref
@@ -574,7 +584,7 @@ class _ContactActionButtonState extends ConsumerState<_ContactActionButton> {
     setState(() => _isLoading = true);
     await ref
         .read(contactProvider.notifier)
-        .declineRequest(requestId);
+        .declineRequest(requestId, widget.conv.otherUserId);
     if (mounted) {
       setState(() {
         _isLoading = false;

@@ -11,12 +11,21 @@ import '../providers/local_db_provider.dart';
 // Cache for peer public keys to avoid redundant API calls
 final _peerKeyCache = <String, String>{};
 
-// THE STATE CLASS
 class ConversationState {
   final List<Conversation> conversations;
   final bool isLoading;
 
   ConversationState({this.conversations = const [], this.isLoading = true});
+
+  ConversationState copyWith({
+    List<Conversation>? conversations,
+    bool? isLoading,
+  }) {
+    return ConversationState(
+      conversations: conversations ?? this.conversations,
+      isLoading: isLoading ?? this.isLoading,
+    );
+  }
 }
 
 // THE PROVIDER DEFINITION
@@ -464,5 +473,17 @@ class ConversationsNotifier extends Notifier<ConversationState> {
       lastMessageIsDeleted: c.lastMessageIsDeleted,
       updatedAt: c.updatedAt,
     );
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // CONTACT STATUS UPDATER (For real-time UI)
+  // ──────────────────────────────────────────────────────────────────────────
+  void updateContactStatus(String userId, String contactStatus) {
+    final index = state.conversations.indexWhere((c) => c.otherUserId == userId);
+    if (index != -1) {
+      final updatedList = List<Conversation>.from(state.conversations);
+      updatedList[index] = updatedList[index].copyWith(contactStatus: contactStatus);
+      state = state.copyWith(conversations: updatedList);
+    }
   }
 }

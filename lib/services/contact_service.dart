@@ -63,21 +63,27 @@ class ContactService {
     }
   }
 
-  Future<List<ContactRequest>> getPendingRequests() async {
+  Future<Map<String, List<ContactRequest>>> getPendingRequests() async {
     try {
       final token = await _token();
-      if (token == null) return [];
+      if (token == null) return {'incoming': [], 'outgoing': []};
       final resp = await http.get(
         Uri.parse('$baseUrl/pending'),
         headers: {'Authorization': 'Bearer $token'},
       );
       if (resp.statusCode == 200) {
-        final list = jsonDecode(resp.body) as List;
-        return list.map((e) => ContactRequest.fromJson(e)).toList();
+        final data = jsonDecode(resp.body) as Map<String, dynamic>;
+        final incoming = (data['incoming'] as List? ?? [])
+            .map((e) => ContactRequest.fromJson(e, isIncoming: true))
+            .toList();
+        final outgoing = (data['outgoing'] as List? ?? [])
+            .map((e) => ContactRequest.fromJson(e, isIncoming: false))
+            .toList();
+        return {'incoming': incoming, 'outgoing': outgoing};
       }
-      return [];
+      return {'incoming': [], 'outgoing': []};
     } catch (_) {
-      return [];
+      return {'incoming': [], 'outgoing': []};
     }
   }
 
