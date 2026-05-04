@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter_native_splash/flutter_native_splash.dart';
 import 'firebase_options.dart';
 import 'screens/login_screen.dart';
 import 'screens/home_screen.dart';
@@ -8,22 +9,27 @@ import 'providers/auth_provider.dart';
 import 'services/notification_service.dart';
 
 void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+  // Keep native splash until we're ready to show Flutter UI
+  final widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
+  FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
 
-  // 1. Initialize Firebase (Safe for all platforms including Windows)
+  // 1. Firebase must be first (required by FCM and Auth)
   try {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
-    print("✅ Firebase Initialized");
   } catch (e) {
     print("⚠️ Firebase Init Warning: $e");
   }
 
-  // 2. Initialize Notifications (Will skip FCM on Windows automatically)
-  await NotificationService().initNotifications();
-
+  // 2. Remove native splash and render the app
+  FlutterNativeSplash.remove();
   runApp(const ProviderScope(child: ChatApp()));
+
+  // 3. Initialize notifications AFTER first frame (non-blocking)
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    NotificationService().initNotifications();
+  });
 }
 
 class ChatApp extends ConsumerStatefulWidget {
@@ -49,8 +55,34 @@ class _ChatAppState extends ConsumerState<ChatApp> {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'ViralChat',
-      // ✅ CORRECT: Let LoginScreen handle its own loading
-      home: authState.user != null ? const HomeScreen() : const LoginScreen(),
+      theme: ThemeData(
+        scaffoldBackgroundColor: const Color(0xFF0F172A),
+        colorScheme: const ColorScheme.dark(),
+      ),
+      home: authState.isLoading
+          ? const _SplashLoadingScreen()
+          : authState.user != null
+              ? const HomeScreen()
+              : const LoginScreen(),
+    );
+  }
+}
+
+/// Shown for the ~50ms between Flutter first frame and checkAuthStatus completion.
+/// Matches the native splash color so the transition is seamless.
+class _SplashLoadingScreen extends StatelessWidget {
+  const _SplashLoadingScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      backgroundColor: Color(0xFF0F172A),
+      body: Center(
+        child: CircularProgressIndicator(
+          color: Colors.white,
+          strokeWidth: 2,
+        ),
+      ),
     );
   }
 }

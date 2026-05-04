@@ -21,6 +21,12 @@ class E2eeService {
   final Hkdf _hkdf = Hkdf(hmac: Hmac.sha256(), outputLength: 32);
   final Random _random = Random.secure();
 
+  // ── In-memory caches to avoid repeated Android Keystore reads ──
+  List<int>? _cachedPrivateKeyBytes;
+  List<int>? _cachedPublicKeyBytes;
+  // Derived AES-GCM key per conversation pair (keyed by sorted userId pair)
+  final Map<String, SecretKey> _conversationKeyCache = {};
+
   /// Derives or retrieves the client-side AES key used to encrypt the private key
   /// before it is backed up to the server.
   Future<String?> getOrDeriveBackupKey({String? password, String? salt}) async {
@@ -118,6 +124,9 @@ class E2eeService {
     final existingPrivateKey = await _storage.read(key: _privateKeyStorageKey);
 
     if (existingPublicKey != null && existingPrivateKey != null) {
+      // Warm the in-memory cache so first decrypt is instant
+      _cachedPublicKeyBytes = base64Decode(existingPublicKey);
+      _cachedPrivateKeyBytes = base64Decode(existingPrivateKey);
       await _storage.write(key: _keyOwnerStorageKey, value: userId);
       return existingPublicKey;
     }
@@ -149,10 +158,12 @@ class E2eeService {
             }
 
             if (decryptedPriv != null && decryptedPriv.isNotEmpty) {
-              // Save the server keys locally so next restart is instant.
               await _storage.write(key: _publicKeyStorageKey, value: serverPub);
               await _storage.write(key: _privateKeyStorageKey, value: decryptedPriv);
               await _storage.write(key: _keyOwnerStorageKey, value: userId);
+              // Warm in-memory cache
+              _cachedPublicKeyBytes = base64Decode(serverPub);
+              _cachedPrivateKeyBytes = base64Decode(decryptedPriv);
               print('E2EE: Restored key pair from encrypted server backup.');
               return serverPub;
             }
@@ -176,6 +187,10 @@ class E2eeService {
     await _storage.write(key: _publicKeyStorageKey, value: publicB64);
     await _storage.write(key: _privateKeyStorageKey, value: privateB64);
     await _storage.write(key: _keyOwnerStorageKey, value: userId);
+
+    // Warm up in-memory cache immediately after generation
+    _cachedPrivateKeyBytes = base64Decode(privateB64);
+    _cachedPublicKeyBytes = base64Decode(publicB64);
 
     print('E2EE: Generated new key pair (first-time setup).');
     return publicB64;
@@ -268,39 +283,47 @@ class E2eeService {
     required String peerUserId,
     required String peerPublicKeyB64,
   }) async {
-    final myPrivateKeyB64 = await _storage.read(key: _privateKeyStorageKey);
-    final myPublicKeyB64 = await _storage.read(key: _publicKeyStorageKey);
-
-    if (myPrivateKeyB64 == null || myPublicKeyB64 == null) {
-      throw StateError('E2EE identity key is missing.');
+    // Cache key: sorted pair so A→B and B→A share the same key
+    final cacheKey = ([myUserId, peerUserId]..sort()).join(':');
+    if (_conversationKeyCache.containsKey(cacheKey)) {
+      return _conversationKeyCache[cacheKey]!;
     }
 
-    final myPrivateBytes = base64Decode(myPrivateKeyB64);
-    final myPublicBytes = base64Decode(myPublicKeyB64);
+    // Use cached bytes if available, else read from Keystore (once)
+    if (_cachedPrivateKeyBytes == null || _cachedPublicKeyBytes == null) {
+      final myPrivateKeyB64 = await _storage.read(key: _privateKeyStorageKey);
+      final myPublicKeyB64 = await _storage.read(key: _publicKeyStorageKey);
+      if (myPrivateKeyB64 == null || myPublicKeyB64 == null) {
+        throw StateError('E2EE identity key is missing.');
+      }
+      _cachedPrivateKeyBytes = base64Decode(myPrivateKeyB64);
+      _cachedPublicKeyBytes = base64Decode(myPublicKeyB64);
+    }
+
     final peerPublicBytes = base64Decode(peerPublicKeyB64);
 
     final myKeyPair = SimpleKeyPairData(
-      myPrivateBytes,
-      publicKey: SimplePublicKey(myPublicBytes, type: KeyPairType.x25519),
+      _cachedPrivateKeyBytes!,
+      publicKey: SimplePublicKey(_cachedPublicKeyBytes!, type: KeyPairType.x25519),
       type: KeyPairType.x25519,
     );
 
     final sharedSecret = await _x25519.sharedSecretKey(
       keyPair: myKeyPair,
-      remotePublicKey: SimplePublicKey(
-        peerPublicBytes,
-        type: KeyPairType.x25519,
-      ),
+      remotePublicKey: SimplePublicKey(peerPublicBytes, type: KeyPairType.x25519),
     );
 
     final participants = [myUserId, peerUserId]..sort();
     final nonce = utf8.encode(participants.join(':'));
 
-    return _hkdf.deriveKey(
+    final derivedKey = await _hkdf.deriveKey(
       secretKey: sharedSecret,
       nonce: nonce,
       info: utf8.encode(_protocolInfo),
     );
+
+    _conversationKeyCache[cacheKey] = derivedKey;
+    return derivedKey;
   }
 
   Future<void> _clearIdentity() async {

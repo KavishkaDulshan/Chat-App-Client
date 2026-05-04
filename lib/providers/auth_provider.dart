@@ -82,11 +82,16 @@ class AuthController extends Notifier<AuthState> {
     final user = await authService.tryAutoLogin();
 
     if (user != null) {
-      // Auto-login does not have the password, so backupKey is fetched from secure storage
-      await _bootstrapE2EE(user);
+      // ── Show home screen IMMEDIATELY from local data ──
+      // The user sees the UI now. E2EE + DB init run in background.
       _connectSocket(user);
-      await _initLocalDatabase(user);
       state = AuthState(user: user, isLoading: false);
+
+      // ── Background: DB init + E2EE bootstrap in parallel ──
+      await Future.wait([
+        _initLocalDatabase(user),
+        _bootstrapE2EE(user), // uses cached backup key from secure storage
+      ]);
     } else {
       state = AuthState(isLoading: false);
     }
