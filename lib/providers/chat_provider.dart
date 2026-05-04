@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 
+import '../services/audio_service.dart';
 import '../services/auth_service.dart';
 import '../services/e2ee_service.dart';
 import '../services/image_service.dart';
@@ -12,6 +13,7 @@ import '../services/local_db/database.dart';
 import 'auth_provider.dart';
 import 'local_db_provider.dart';
 import 'socket_provider.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 
 class ChatState {
   final List<Map<String, dynamic>> messages;
@@ -283,6 +285,26 @@ class ChatController extends Notifier<ChatState> {
     };
 
     _deleteHandler = (messageId) {
+      // 1. Find the original message to check if it's media
+      try {
+        final oldMsg = state.messages.firstWhere((m) => m['_id'] == messageId);
+        final type = oldMsg['type']?.toString();
+        final content = oldMsg['content']?.toString();
+
+        if (content != null && content.isNotEmpty && content.startsWith('http')) {
+          if (type == 'image') {
+            CachedNetworkImage.evictFromCache(content);
+            print('🗑️ Evicted image from local cache: $content');
+          } else if (type == 'audio') {
+            AudioService().deleteCachedAudio(content);
+            print('🗑️ Evicted audio from local cache: $content');
+          }
+        }
+      } catch (_) {
+        // Message not found in current state
+      }
+
+      // 2. Update state to reflect deletion
       final updatedMessages = state.messages.map((msg) {
         if (msg['_id'] == messageId) {
           return {
@@ -295,7 +317,7 @@ class ChatController extends Notifier<ChatState> {
       }).toList();
       state = state.copyWith(messages: updatedMessages);
 
-      // Update local cache
+      // 3. Update local DB cache
       final db = ref.read(localDbProvider);
       db?.markMessageDeleted(messageId.toString());
     };

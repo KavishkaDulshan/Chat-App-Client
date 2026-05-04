@@ -1,4 +1,6 @@
 // lib/services/audio_service.dart
+import 'dart:convert';
+import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:record/record.dart';
@@ -77,6 +79,27 @@ class AudioService {
       print("Audio Upload Error: $e");
     }
     return null;
+  }
+
+  Future<void> deleteCachedAudio(String url) async {
+    if (kIsWeb) return;
+    try {
+      final bytes = utf8.encode(url);
+      final hash = base64Encode(bytes);
+      final safeHash = hash.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '');
+      final ext = url.contains('.mp3') ? '.mp3' : '.m4a';
+      final fileName =
+          '${safeHash.substring(safeHash.length > 32 ? safeHash.length - 32 : 0)}$ext';
+
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/audio_cache/$fileName');
+      if (await file.exists()) {
+        await file.delete();
+        print('🗑️ Deleted cached audio: $fileName');
+      }
+    } catch (e) {
+      print("Delete Cached Audio Error: $e");
+    }
   }
 
   void dispose() {
