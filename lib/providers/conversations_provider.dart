@@ -232,6 +232,14 @@ class ConversationsNotifier extends Notifier<ConversationState> {
         }
       }
 
+      // Format media messages for preview
+      final type = data['type']?.toString();
+      if (type == 'image') {
+        content = '📷 Photo';
+      } else if (type == 'audio') {
+        content = '🎤 Voice Message';
+      }
+
       // Create a modifiable copy
       final List<Conversation> currentList = List.from(state.conversations);
 
@@ -239,12 +247,21 @@ class ConversationsNotifier extends Notifier<ConversationState> {
       String targetOtherUserId = '';
 
       if (senderId == myId) {
-        final index = currentList.indexWhere((c) => c.id == roomId);
-        if (index != -1) {
-          targetOtherUserId = currentList[index].otherUserId;
+        // First, try to find by room ID
+        final indexById = currentList.indexWhere((c) => c.id == roomId);
+        if (indexById != -1) {
+          targetOtherUserId = currentList[indexById].otherUserId;
         } else {
-          loadChats();
-          return;
+          // For brand-new conversations, the room ID is fresh from the server.
+          // Try to find the conversation by peer user ID from the payload.
+          final peerIdFromPayload = data['receiver_id']?.toString() ?? '';
+          if (peerIdFromPayload.isNotEmpty) {
+            targetOtherUserId = peerIdFromPayload;
+          } else {
+            // Fall back to reloading the full list from server
+            loadChats();
+            return;
+          }
         }
       } else {
         targetOtherUserId = senderId;
@@ -268,18 +285,42 @@ class ConversationsNotifier extends Notifier<ConversationState> {
           lastMessageIsEncrypted: false,
           time: DateTime.now(),
         );
+        // Update the room ID if it changed (e.g. temp ID → real MongoDB ID)
+        if (existingConv.id != roomId && roomId.isNotEmpty) {
+          updatedConv = Conversation(
+            id: roomId,
+            otherUserId: updatedConv.otherUserId,
+            otherUserName: updatedConv.otherUserName,
+            otherUserAvatar: updatedConv.otherUserAvatar,
+            isOnline: updatedConv.isOnline,
+            lastMessage: content,
+            lastMessageIsEncrypted: false,
+            updatedAt: DateTime.now(),
+          );
+        }
       } else {
-        if (senderId == myId) return;
-
-        updatedConv = Conversation(
-          id: roomId,
-          otherUserId: senderId,
-          otherUserName: data['sender_name'] ?? 'User',
-          otherUserAvatar: data['sender_avatar'],
-          lastMessage: content,
-          updatedAt: DateTime.now(),
-          isOnline: true,
-        );
+        if (senderId == myId) {
+          // Sender created a new chat — build the conversation from payload
+          updatedConv = Conversation(
+            id: roomId,
+            otherUserId: targetOtherUserId,
+            otherUserName: data['receiver_name'] ?? 'User',
+            otherUserAvatar: data['receiver_avatar'],
+            lastMessage: content,
+            updatedAt: DateTime.now(),
+            isOnline: true,
+          );
+        } else {
+          updatedConv = Conversation(
+            id: roomId,
+            otherUserId: senderId,
+            otherUserName: data['sender_name'] ?? 'User',
+            otherUserAvatar: data['sender_avatar'],
+            lastMessage: content,
+            updatedAt: DateTime.now(),
+            isOnline: true,
+          );
+        }
       }
 
       currentList.insert(0, updatedConv);

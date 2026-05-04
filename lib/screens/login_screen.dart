@@ -4,6 +4,7 @@ import '../providers/auth_provider.dart';
 import 'home_screen.dart';
 import '../app_theme.dart';
 import 'otp_verification_screen.dart'; // <--- IMPORTANT IMPORT
+import 'forgot_password_screen.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -15,12 +16,24 @@ class LoginScreen extends ConsumerStatefulWidget {
 class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _confirmPasswordController = TextEditingController();
   final _usernameController = TextEditingController();
+  
   bool _isLoginMode = true;
+  bool _obscurePassword = true;
+  bool _obscureConfirmPassword = true;
+
+  bool _isStrongPassword(String password) {
+    // Min 8 chars, 1 uppercase, 1 lowercase, 1 number, 1 special char
+    final regex = RegExp(
+        r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$');
+    return regex.hasMatch(password);
+  }
 
   void _handleAuth() async {
     final email = _emailController.text.trim();
     final password = _passwordController.text.trim();
+    final confirmPassword = _confirmPasswordController.text.trim();
     final username = _usernameController.text.trim();
 
     if (email.isEmpty || password.isEmpty) return;
@@ -33,6 +46,22 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       await ref.read(authProvider.notifier).login(email, password);
     } else {
       // --- SIGN UP LOGIC ---
+      if (password != confirmPassword) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Passwords do not match')),
+        );
+        return;
+      }
+      
+      if (!_isStrongPassword(password)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text(
+                  'Password must be at least 8 characters long, include an uppercase letter, a lowercase letter, a number, and a special character.')),
+        );
+        return;
+      }
+
       final success = await ref
           .read(authProvider.notifier)
           .signUp(username, email, password);
@@ -155,10 +184,64 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     decoration: AppTheme.inputDecoration(
                       'Password',
                       icon: Icons.lock_outline,
+                    ).copyWith(
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                          color: AppTheme.textSecondary,
+                        ),
+                        onPressed: () {
+                          setState(() {
+                            _obscurePassword = !_obscurePassword;
+                          });
+                        },
+                      ),
                     ),
-                    obscureText: true,
+                    obscureText: _obscurePassword,
                   ),
-                  const SizedBox(height: 32),
+                  if (!_isLoginMode) ...[
+                    const SizedBox(height: 20),
+                    TextField(
+                      controller: _confirmPasswordController,
+                      style: const TextStyle(color: AppTheme.textPrimary),
+                      decoration: AppTheme.inputDecoration(
+                        'Confirm Password',
+                        icon: Icons.lock_outline,
+                      ).copyWith(
+                        suffixIcon: IconButton(
+                          icon: Icon(
+                            _obscureConfirmPassword ? Icons.visibility_off : Icons.visibility,
+                            color: AppTheme.textSecondary,
+                          ),
+                          onPressed: () {
+                            setState(() {
+                              _obscureConfirmPassword = !_obscureConfirmPassword;
+                            });
+                          },
+                        ),
+                      ),
+                      obscureText: _obscureConfirmPassword,
+                    ),
+                  ],
+                  if (_isLoginMode)
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton(
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (context) => const ForgotPasswordScreen(),
+                            ),
+                          );
+                        },
+                        child: const Text(
+                          'Forgot Password?',
+                          style: TextStyle(color: AppTheme.primary),
+                        ),
+                      ),
+                    )
+                  else
+                    const SizedBox(height: 32),
 
                   // 3. Action Button
                   SizedBox(

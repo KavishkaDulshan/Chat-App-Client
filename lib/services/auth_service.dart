@@ -283,10 +283,15 @@ class AuthService {
     }
   }
 
-  // Add this inside AuthService class
-  Future<User?> updateProfilePic(String userId, String imageUrl) async {
+  Future<User?> updateProfile({String? imageUrl, String? username}) async {
     try {
       final token = await storage.read(key: 'jwt_token');
+
+      final body = <String, dynamic>{};
+      if (imageUrl != null) body['profile_pic'] = imageUrl;
+      if (username != null) body['username'] = username;
+
+      print("📤 updateProfile request: $body to $baseUrl/update-profile");
 
       final response = await http.put(
         Uri.parse('$baseUrl/update-profile'),
@@ -294,20 +299,58 @@ class AuthService {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
         },
-        body: jsonEncode({
-          'profile_pic': imageUrl,
-        }),
+        body: jsonEncode(body),
       );
+
+      print("📥 updateProfile response: ${response.statusCode} ${response.body}");
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         // Update local storage with new user data
         await storage.write(key: 'user_data', value: jsonEncode(data));
         return User.fromJson(data, token!);
+      } else {
+        print("❌ updateProfile failed: ${response.statusCode}");
       }
     } catch (e) {
       print("Update Profile Error: $e");
     }
     return null;
+  }
+
+  Future<String?> forgotPassword(String email) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/forgot-password'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'email': email}),
+      );
+      if (response.statusCode == 200) {
+        return null; // success
+      }
+      final data = jsonDecode(response.body);
+      return data['error'] ?? 'Failed to send OTP';
+    } catch (e) {
+      print("Forgot Password Error: $e");
+      return 'Network error. Please check your connection.';
+    }
+  }
+
+  Future<bool> resetPassword(String email, String otp, String newPassword) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/reset-password'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'email': email,
+          'otp': otp,
+          'newPassword': newPassword,
+        }),
+      );
+      return response.statusCode == 200;
+    } catch (e) {
+      print("Reset Password Error: $e");
+      return false;
+    }
   }
 }

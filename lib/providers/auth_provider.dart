@@ -159,4 +159,10 @@ class AuthController extends Notifier<AuthState> {
       return false;
     }
   }
+
+  /// Directly update the user in state (e.g. after profile edits).
+  /// Does NOT re-bootstrap E2EE or reconnect socket.
+  void setUser(User user) {
+    state = AuthState(user: user, isLoading: false);
+  }
 }

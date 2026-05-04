@@ -18,6 +18,56 @@ class ProfileScreen extends ConsumerStatefulWidget {
 class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   bool _isUploading = false;
 
+  bool _isEditingName = false;
+  bool _isSavingName = false;
+  final TextEditingController _nameController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final user = ref.read(authProvider).user;
+      if (user != null) {
+        _nameController.text = user.username;
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _updateUsername() async {
+    final newName = _nameController.text.trim();
+    if (newName.isEmpty) return;
+
+    setState(() => _isSavingName = true);
+
+    final authService = ref.read(authServiceProvider);
+    final updatedUser = await authService.updateProfile(username: newName);
+
+    if (updatedUser != null) {
+      // Directly update the auth state with the new user data
+      ref.read(authProvider.notifier).setUser(updatedUser);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Username updated successfully!")),
+        );
+        setState(() => _isEditingName = false);
+      }
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Failed to update username.")),
+        );
+      }
+    }
+
+    setState(() => _isSavingName = false);
+  }
+
   Future<void> _pickAndUploadImage() async {
     final imageService = ImageService();
     final authService = ref.read(authServiceProvider);
@@ -25,21 +75,17 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
     if (user == null) return;
 
-    // UPDATED: Now uses XFile instead of File
     final XFile? file = await imageService.pickImage();
     if (file == null) return;
 
     setState(() => _isUploading = true);
 
-    // 2. Upload to Azure via Backend (256px compressed profile endpoint)
     final String? imageUrl = await imageService.uploadProfileImage(file);
 
     if (imageUrl != null) {
-      // 3. Update User Profile in MongoDB
-      final updatedUser = await authService.updateProfilePic(user.id, imageUrl);
+      final updatedUser = await authService.updateProfile(imageUrl: imageUrl);
 
       if (updatedUser != null) {
-        // 4. Force refresh the AuthProvider state
         ref.read(authProvider.notifier).checkAuthStatus();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -59,11 +105,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
-        title: Text("My Profile", style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.bold)),
+        title: const Text("My Profile", style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.bold)),
         backgroundColor: AppTheme.background,
         elevation: 0,
         centerTitle: true,
-        iconTheme: IconThemeData(color: AppTheme.textPrimary),
+        iconTheme: const IconThemeData(color: AppTheme.textPrimary),
       ),
       body: Center(
         child: SingleChildScrollView(
@@ -99,18 +145,18 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                                 radius: 64,
                                 backgroundImage: imageProvider,
                               ),
-                              placeholder: (context, url) => CircleAvatar(
+                              placeholder: (context, url) => const CircleAvatar(
                                 radius: 64,
                                 backgroundColor: AppTheme.secondary,
-                                child: const CircularProgressIndicator(strokeWidth: 2),
+                                child: CircularProgressIndicator(strokeWidth: 2),
                               ),
-                              errorWidget: (context, url, error) => CircleAvatar(
+                              errorWidget: (context, url, error) => const CircleAvatar(
                                 radius: 64,
                                 backgroundColor: AppTheme.secondary,
                                 child: Icon(Icons.person_outline, size: 64, color: AppTheme.textSecondary),
                               ),
                             )
-                          : CircleAvatar(
+                          : const CircleAvatar(
                               radius: 64,
                               backgroundColor: AppTheme.secondary,
                               child: Icon(Icons.person_outline, size: 64, color: AppTheme.textSecondary),
@@ -148,10 +194,51 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   ],
                 ),
                 const SizedBox(height: 32),
-                Text(
-                  user?.username ?? "User",
-                  style: AppTheme.headerStyle.copyWith(fontSize: 28),
-                ),
+                if (_isEditingName)
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _nameController,
+                          style: AppTheme.headerStyle.copyWith(fontSize: 24),
+                          decoration: AppTheme.inputDecoration("Username").copyWith(
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      _isSavingName
+                          ? const CircularProgressIndicator()
+                          : IconButton(
+                              icon: const Icon(Icons.check, color: AppTheme.primary),
+                              onPressed: _updateUsername,
+                            ),
+                      IconButton(
+                        icon: const Icon(Icons.close, color: Colors.grey),
+                        onPressed: () {
+                          setState(() {
+                            _nameController.text = user?.username ?? "User";
+                            _isEditingName = false;
+                          });
+                        },
+                      ),
+                    ],
+                  )
+                else
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        user?.username ?? "User",
+                        style: AppTheme.headerStyle.copyWith(fontSize: 28),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        icon: const Icon(Icons.edit, size: 20, color: AppTheme.textSecondary),
+                        onPressed: () => setState(() => _isEditingName = true),
+                      ),
+                    ],
+                  ),
                 const SizedBox(height: 8),
                 Text(
                   user?.email ?? "",

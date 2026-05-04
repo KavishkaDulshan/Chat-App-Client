@@ -282,9 +282,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
     // 3. Check for Photo
     final bool isImage =
-        conv.lastMessage.contains('/image/upload/') ||
+        conv.lastMessage.contains('📷 Photo') ||
+        conv.lastMessage.contains('📷 Image') ||
         conv.lastMessage.endsWith('.jpg') ||
-        conv.lastMessage.endsWith('.png');
+        conv.lastMessage.endsWith('.png') ||
+        conv.lastMessage.endsWith('.webp');
 
     if (isImage) {
       return Row(
