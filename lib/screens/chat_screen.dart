@@ -54,8 +54,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   void _onScroll() {
-    if (_scrollController.position.pixels <=
-        _scrollController.position.minScrollExtent + 50) {
+    if (_scrollController.position.pixels >=
+        _scrollController.position.maxScrollExtent - 50) {
       ref.read(chatProvider.notifier).loadMoreMessages();
     }
   }
@@ -63,7 +63,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   void _scrollToBottom() {
     if (_scrollController.hasClients) {
       _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
+        0.0,
         duration: const Duration(milliseconds: 300),
         curve: Curves.easeOut,
       );
@@ -119,7 +119,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     ref.listen<ChatState>(chatProvider, (previous, next) {
       final prevLen = previous?.messages.length ?? 0;
       if (next.messages.length > prevLen && !next.isLoadingMore) {
-        WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+        if (_scrollController.hasClients && _scrollController.position.pixels < 100) {
+          WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+        }
       }
     });
 
@@ -171,12 +173,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   child: chatState.isLoading && chatState.messages.isEmpty
                     ? const Center(child: CircularProgressIndicator())
                     : ListView.builder(
+                        reverse: true,
                         controller: _scrollController,
                         padding: const EdgeInsets.symmetric(
                             horizontal: 16, vertical: 20),
                         itemCount: chatState.messages.length,
                         itemBuilder: (context, index) {
-                          final msg = chatState.messages[index];
+                          final msg = chatState.messages[chatState.messages.length - 1 - index];
                           final isMe = msg['sender_id'] == myUserId;
                           final isDeleted = msg['isDeleted'] == true;
 
