@@ -18,55 +18,68 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     final content = message.data['content'] ?? '';
     final senderId = message.data['senderId'] ?? '';
     final roomId = message.data['roomId'] ?? '';
+    final previewEnabled = message.data['previewEnabled'] == 'true';
     
+    String displayTitle = "New Message from $senderName";
     String displayBody = "Tap to view message";
 
-    if (msgType == 'image') {
-      displayBody = "📷 Sent an image";
-    } else if (msgType == 'audio') {
-      displayBody = "🎵 Sent a voice message";
-    } else if (content.isNotEmpty) {
-       // Attempt decryption
-       if (E2eeService().isE2EMessage(content)) {
-           final authService = AuthService();
-           final e2eService = E2eeService();
-           
-           try {
-             const storage = FlutterSecureStorage();
-             final userDataString = await storage.read(key: 'user_data');
-             if (userDataString != null) {
-               final userMap = jsonDecode(userDataString);
-               final myUserId = userMap['_id'];
-               
-               final peerKey = await authService.getUserE2EEPublicKey(senderId);
-               if (peerKey != null && peerKey.isNotEmpty) {
-                 final decrypted = await e2eService.decryptTextMessage(
-                    encryptedPayload: content,
-                    myUserId: myUserId,
-                    peerUserId: senderId,
-                    peerPublicKeyB64: peerKey,
-                 );
-                 if (decrypted != null) {
-                   displayBody = decrypted;
-                 } else {
-                   displayBody = "🔒 Encrypted message";
-                 }
-               } else {
-                 displayBody = "🔒 Encrypted message";
-               }
-             } else {
-               displayBody = "🔒 Encrypted message";
-             }
-           } catch(e) {
-             print("Background Decryption Error: $e");
-             displayBody = "🔒 Encrypted message";
-           }
-       } else {
-           displayBody = content; // unencrypted text
+    if (!previewEnabled) {
+       // Just show generic notification
+       if (msgType == 'image') {
+         displayBody = "📷 Sent an image";
+       } else if (msgType == 'audio') {
+         displayBody = "🎵 Sent a voice message";
+       }
+    } else {
+       // Preview IS enabled, try to show content
+       displayTitle = senderName; // When showing content, title is just the sender's name
+       if (msgType == 'image') {
+         displayBody = "📷 Sent an image";
+       } else if (msgType == 'audio') {
+         displayBody = "🎵 Sent a voice message";
+       } else if (content.isNotEmpty) {
+          // Attempt decryption
+          if (E2eeService().isE2EMessage(content)) {
+              final authService = AuthService();
+              final e2eService = E2eeService();
+              
+              try {
+                const storage = FlutterSecureStorage();
+                final userDataString = await storage.read(key: 'user_data');
+                if (userDataString != null) {
+                  final userMap = jsonDecode(userDataString);
+                  final myUserId = userMap['_id'];
+                  
+                  final peerKey = await authService.getUserE2EEPublicKey(senderId);
+                  if (peerKey != null && peerKey.isNotEmpty) {
+                    final decrypted = await e2eService.decryptTextMessage(
+                       encryptedPayload: content,
+                       myUserId: myUserId,
+                       peerUserId: senderId,
+                       peerPublicKeyB64: peerKey,
+                    );
+                    if (decrypted != null) {
+                      displayBody = decrypted;
+                    } else {
+                      displayBody = "🔒 Encrypted message";
+                    }
+                  } else {
+                    displayBody = "🔒 Encrypted message";
+                  }
+                } else {
+                  displayBody = "🔒 Encrypted message";
+                }
+              } catch(e) {
+                print("Background Decryption Error: $e");
+                displayBody = "🔒 Encrypted message";
+              }
+          } else {
+              displayBody = content; // unencrypted text
+          }
        }
     }
 
-    await NotificationService().showLocalNotification(senderName, displayBody, payload: roomId);
+    await NotificationService().showLocalNotification(displayTitle, displayBody, payload: roomId);
   }
 }
 

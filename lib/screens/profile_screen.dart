@@ -1,5 +1,6 @@
 // REMOVED: import 'dart:io'; <-- Caused Web Crash
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart'; // <-- ADDED THIS
@@ -244,34 +245,36 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   user?.email ?? "",
                   style: AppTheme.subTitleStyle.copyWith(fontSize: 16),
                 ),
-                const SizedBox(height: 32),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: AppTheme.cardColor,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: const Color(0xFFE2E8F0), width: 1),
-                  ),
-                  child: SwitchListTile(
-                    title: const Text(
-                      "Show Message Preview",
-                      style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w500),
+                if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) ...[
+                  const SizedBox(height: 32),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: AppTheme.cardColor,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0xFFE2E8F0), width: 1),
                     ),
-                    subtitle: const Text(
-                      "Display message content in push notifications",
-                      style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+                    child: SwitchListTile(
+                      title: const Text(
+                        "Show Message Preview",
+                        style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w500),
+                      ),
+                      subtitle: const Text(
+                        "Display message content in push notifications",
+                        style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+                      ),
+                      value: user?.showNotificationPreview ?? false,
+                      activeColor: AppTheme.primary,
+                      contentPadding: EdgeInsets.zero,
+                      onChanged: (value) async {
+                        final updatedUser = await ref.read(authServiceProvider).updateProfile(showNotificationPreview: value);
+                        if (updatedUser != null) {
+                          ref.read(authProvider.notifier).setUser(updatedUser);
+                        }
+                      },
                     ),
-                    value: user?.showNotificationPreview ?? false,
-                    activeColor: AppTheme.primary,
-                    contentPadding: EdgeInsets.zero,
-                    onChanged: (value) async {
-                      final updatedUser = await ref.read(authServiceProvider).updateProfile(showNotificationPreview: value);
-                      if (updatedUser != null) {
-                        ref.read(authProvider.notifier).setUser(updatedUser);
-                      }
-                    },
                   ),
-                ),
+                ],
                 const SizedBox(height: 24),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
