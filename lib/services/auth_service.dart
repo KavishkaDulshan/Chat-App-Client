@@ -283,13 +283,14 @@ class AuthService {
     }
   }
 
-  Future<User?> updateProfile({String? imageUrl, String? username}) async {
+  Future<User?> updateProfile({String? imageUrl, String? username, bool? showNotificationPreview}) async {
     try {
       final token = await storage.read(key: 'jwt_token');
 
       final body = <String, dynamic>{};
       if (imageUrl != null) body['profile_pic'] = imageUrl;
       if (username != null) body['username'] = username;
+      if (showNotificationPreview != null) body['showNotificationPreview'] = showNotificationPreview;
 
       print("📤 updateProfile request: $body to $baseUrl/update-profile");
 

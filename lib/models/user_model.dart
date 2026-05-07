@@ -6,6 +6,7 @@ class User {
   final String? profilePic;
   final String? e2ePublicKey;
   final int e2eKeyVersion;
+  final bool showNotificationPreview;
 
   User({
     required this.id,
@@ -15,6 +16,7 @@ class User {
     this.profilePic,
     this.e2ePublicKey,
     this.e2eKeyVersion = 1,
+    this.showNotificationPreview = false,
   });
 
   factory User.fromJson(Map<String, dynamic> json, String token) {
@@ -26,6 +28,7 @@ class User {
       profilePic: json['profile_pic'],
       e2ePublicKey: json['e2e_public_key'],
       e2eKeyVersion: json['e2e_key_version'] ?? 1,
+      showNotificationPreview: json['settings']?['showNotificationPreview'] ?? false,
     );
   }
 }
