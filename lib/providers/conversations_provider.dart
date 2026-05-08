@@ -7,6 +7,7 @@ import '../services/local_db/database.dart';
 import '../providers/socket_provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/local_db_provider.dart';
+import '../providers/chat_provider.dart';
 
 // Cache for peer public keys to avoid redundant API calls
 final _peerKeyCache = <String, String>{};
@@ -311,6 +312,19 @@ class ConversationsNotifier extends Notifier<ConversationState> {
       existingConv = currentList.removeAt(index);
     }
 
+    int currentUnreadCount = existingConv?.unreadCount ?? 0;
+    
+    // Check if we are currently inside this room
+    final activeRoomId = ref.read(chatProvider).activeRoomId;
+    final isCurrentlyInRoom = activeRoomId.isNotEmpty && 
+        (activeRoomId == roomId || activeRoomId.contains(targetOtherUserId));
+        
+    if (senderId != myId && !isCurrentlyInRoom) {
+      currentUnreadCount += 1;
+    } else if (isCurrentlyInRoom) {
+      currentUnreadCount = 0;
+    }
+
     Conversation updatedConv;
     if (existingConv != null) {
       // Update room ID if it changed (temp → real MongoDB ID)
@@ -324,12 +338,14 @@ class ConversationsNotifier extends Notifier<ConversationState> {
           lastMessage: content,
           lastMessageIsEncrypted: false,
           updatedAt: DateTime.now(),
+          unreadCount: currentUnreadCount,
         );
       } else {
         updatedConv = existingConv.copyWith(
           lastMessage: content,
           lastMessageIsEncrypted: false,
           time: DateTime.now(),
+          unreadCount: currentUnreadCount,
         );
       }
     } else {
@@ -343,6 +359,7 @@ class ConversationsNotifier extends Notifier<ConversationState> {
           lastMessage: content,
           updatedAt: DateTime.now(),
           isOnline: true,
+          unreadCount: currentUnreadCount,
         );
       } else {
         updatedConv = Conversation(
@@ -353,6 +370,7 @@ class ConversationsNotifier extends Notifier<ConversationState> {
           lastMessage: content,
           updatedAt: DateTime.now(),
           isOnline: true,
+          unreadCount: currentUnreadCount,
         );
       }
     }
@@ -483,6 +501,18 @@ class ConversationsNotifier extends Notifier<ConversationState> {
     if (index != -1) {
       final updatedList = List<Conversation>.from(state.conversations);
       updatedList[index] = updatedList[index].copyWith(contactStatus: contactStatus);
+      state = state.copyWith(conversations: updatedList);
+    }
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // RESET UNREAD COUNT
+  // ──────────────────────────────────────────────────────────────────────────
+  void resetUnreadCount(String roomId) {
+    final index = state.conversations.indexWhere((c) => c.id == roomId || c.otherUserId == roomId);
+    if (index != -1) {
+      final updatedList = List<Conversation>.from(state.conversations);
+      updatedList[index] = updatedList[index].copyWith(unreadCount: 0);
       state = state.copyWith(conversations: updatedList);
     }
   }

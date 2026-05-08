@@ -49,6 +49,7 @@ class Conversation {
       updatedAt: json['updatedAt'] != null
           ? DateTime.tryParse(json['updatedAt'])
           : null,
+      unreadCount: json['unreadCount'] ?? 0,
     );
   }
 
@@ -72,6 +73,7 @@ class Conversation {
     bool? lastMessageIsDeleted,
     bool? lastMessageIsEncrypted,
     DateTime? time,
+    int? unreadCount,
     String? contactStatus,
     String? pendingRequestId,
   }) {
@@ -86,7 +88,7 @@ class Conversation {
       lastMessageIsEncrypted:
           lastMessageIsEncrypted ?? this.lastMessageIsEncrypted,
       updatedAt: time ?? updatedAt,
-      unreadCount: unreadCount,
+      unreadCount: unreadCount ?? this.unreadCount,
       contactStatus: contactStatus ?? this.contactStatus,
       pendingRequestId: pendingRequestId ?? this.pendingRequestId,
     );

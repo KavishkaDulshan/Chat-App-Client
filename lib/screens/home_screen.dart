@@ -76,6 +76,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       roomId = ids.join("_");
     }
 
+    // Reset unread count instantly
+    ref.read(conversationsProvider.notifier).resetUnreadCount(roomId);
+
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -334,6 +337,29 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         ),
         title: Text(conv.otherUserName, style: AppTheme.nameStyle),
         subtitle: _buildLastMessagePreview(conv),
+        trailing: conv.unreadCount > 0
+            ? Container(
+                padding: const EdgeInsets.all(6),
+                decoration: const BoxDecoration(
+                  color: AppTheme.primary,
+                  shape: BoxShape.circle,
+                ),
+                constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+                child: Center(
+                  widthFactor: 1,
+                  heightFactor: 1,
+                  child: Text(
+                    conv.unreadCount > 99 ? '99+' : '${conv.unreadCount}',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              )
+            : null,
         onTap: () => _joinChat(conv),
       ),
     );
