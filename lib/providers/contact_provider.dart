@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/contact_request.dart';
 import '../services/contact_service.dart';
@@ -113,8 +114,8 @@ class ContactNotifier extends Notifier<ContactState> {
 
       // Tell search UI we are contacts
       ref.read(conversationsProvider.notifier).updateContactStatus(byUserId, 'contacts');
-      // Load chats so the new chat shows up immediately
-      ref.read(conversationsProvider.notifier).loadChats();
+      // Load chats with forceRefresh so the new chat shows up immediately
+      ref.read(conversationsProvider.notifier).loadChats(forceRefresh: true);
     });
 
     // A request was declined or cancelled
@@ -136,44 +137,61 @@ class ContactNotifier extends Notifier<ContactState> {
 
   Future<String> sendRequest(String toUserId) async {
     final socket = ref.read(socketServiceProvider).socket;
-    socket.emit('contact:send_request', {'toUserId': toUserId});
+    final completer = Completer<String>();
     
-    final result = await ref.read(contactServiceProvider).sendRequest(toUserId);
-    if (result == null) return 'error';
-    
-    loadPendingRequests(); // refresh outgoing list
-    return result['status']?.toString() ?? 'pending_sent';
+    socket.emitWithAck('contact:send_request', {'toUserId': toUserId}, ack: (dynamic response) {
+      if (response != null && response['status'] == 'success') {
+        completer.complete(response['data']?['status'] ?? 'pending_sent');
+      } else {
+        completer.complete('error');
+      }
+    });
+
+    Future.delayed(const Duration(seconds: 5), () {
+      if (!completer.isCompleted) completer.complete('error');
+    });
+
+    return completer.future;
   }
 
   Future<bool> acceptRequest(String requestId, String fromUserId) async {
     final socket = ref.read(socketServiceProvider).socket;
-    socket.emit('contact:accept_request', {
+    final completer = Completer<bool>();
+    
+    socket.emitWithAck('contact:accept_request', {
       'requestId': requestId,
       'fromUserId': fromUserId,
+    }, ack: (dynamic response) {
+      if (response != null && response['status'] == 'success') {
+        completer.complete(true);
+      } else {
+        completer.complete(false);
+      }
     });
-    
-    final ok = await ref.read(contactServiceProvider).acceptRequest(requestId);
-    if (ok) {
-      final updated = state.incomingRequests.where((r) => r.id != requestId).toList();
-      state = state.copyWith(incomingRequests: updated);
-      ref.read(conversationsProvider.notifier).updateContactStatus(fromUserId, 'contacts');
-      ref.read(conversationsProvider.notifier).loadChats();
-    }
-    return ok;
+
+    Future.delayed(const Duration(seconds: 5), () {
+      if (!completer.isCompleted) completer.complete(false);
+    });
+
+    return completer.future;
   }
 
   Future<bool> declineRequest(String requestId, String peerUserId) async {
     final socket = ref.read(socketServiceProvider).socket;
-    socket.emit('contact:decline_request', {'requestId': requestId});
+    final completer = Completer<bool>();
     
-    final ok = await ref.read(contactServiceProvider).declineRequest(requestId);
-    if (ok) {
-      final inList = state.incomingRequests.where((r) => r.id != requestId).toList();
-      final outList = state.outgoingRequests.where((r) => r.id != requestId).toList();
-      state = state.copyWith(incomingRequests: inList, outgoingRequests: outList);
-      
-      ref.read(conversationsProvider.notifier).updateContactStatus(peerUserId, 'none');
-    }
-    return ok;
+    socket.emitWithAck('contact:decline_request', {'requestId': requestId}, ack: (dynamic response) {
+      if (response != null && response['status'] == 'success') {
+        completer.complete(true);
+      } else {
+        completer.complete(false);
+      }
+    });
+
+    Future.delayed(const Duration(seconds: 5), () {
+      if (!completer.isCompleted) completer.complete(false);
+    });
+
+    return completer.future;
   }
 }
