@@ -171,6 +171,9 @@ class E2eeService {
         }
       } catch (e) {
         print('E2EE: Server key restore failed — $e');
+        // CRITICAL FIX: If we fail to fetch keys due to network or rate limits,
+        // we MUST NOT generate new keys and overwrite the DB!
+        throw Exception('Failed to fetch E2EE keys from server. Aborting to prevent key corruption.');
       }
     }
 

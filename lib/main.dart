@@ -7,6 +7,9 @@ import 'screens/login_screen.dart';
 import 'screens/home_screen.dart';
 import 'providers/auth_provider.dart';
 import 'services/notification_service.dart';
+import 'providers/socket_provider.dart';
+import 'providers/contact_provider.dart';
+import 'providers/conversations_provider.dart';
 
 void main() async {
   // Keep native splash until we're ready to show Flutter UI
@@ -39,13 +42,41 @@ class ChatApp extends ConsumerStatefulWidget {
   ConsumerState<ChatApp> createState() => _ChatAppState();
 }
 
-class _ChatAppState extends ConsumerState<ChatApp> {
+class _ChatAppState extends ConsumerState<ChatApp> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     Future.microtask(() {
       ref.read(authProvider.notifier).checkAuthStatus();
     });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      final user = ref.read(authProvider).user;
+      if (user != null) {
+        // App resumed from background on mobile.
+        // The socket might have disconnected or missed events.
+        try {
+          final socket = ref.read(socketServiceProvider).socket;
+          if (!socket.connected) {
+            socket.connect();
+          }
+        } catch (_) {}
+        
+        // Fetch any data missed while backgrounded
+        ref.read(contactProvider.notifier).loadPendingRequests();
+        ref.read(conversationsProvider.notifier).loadChats(forceRefresh: true);
+      }
+    }
   }
 
   @override

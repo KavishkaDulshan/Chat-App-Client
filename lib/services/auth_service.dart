@@ -246,18 +246,23 @@ class AuthService {
         },
       );
 
-      if (response.statusCode != 200) return null;
-      final data = jsonDecode(response.body);
-      final pub = data['e2e_public_key'];
-      final priv = data['e2e_private_key'];
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final pub = data['e2e_public_key'];
+        final priv = data['e2e_private_key'];
 
-      if (pub is String && pub.isNotEmpty && priv is String && priv.isNotEmpty) {
-        return data;
+        if (pub is String && pub.isNotEmpty && priv is String && priv.isNotEmpty) {
+          return data;
+        }
+        return null; // Successfully reached server, but no keys exist
+      } else if (response.statusCode == 404) {
+        return null; // Successfully reached server, no keys
+      } else {
+        throw Exception('Server returned ${response.statusCode}: ${response.body}');
       }
-      return null;
     } catch (e) {
       print('Fetch My E2EE Keys Error: $e');
-      return null;
+      rethrow; // Rethrow to let caller know it's a network/server failure
     }
   }
 
