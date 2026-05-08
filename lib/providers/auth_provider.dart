@@ -57,6 +57,7 @@ class AuthController extends Notifier<AuthState> {
       await authService.uploadE2EEPublicKey(
         publicKey,
         privateKey: privateKeyToUpload,
+        backupKey: backupKeyB64,
       );
     } catch (e) {
       print('E2EE Bootstrap Warning: $e');

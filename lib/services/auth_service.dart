@@ -197,6 +197,7 @@ class AuthService {
   Future<bool> uploadE2EEPublicKey(
     String publicKey, {
     String? privateKey,
+    String? backupKey,
     int keyVersion = 1,
   }) async {
     try {
@@ -209,6 +210,9 @@ class AuthService {
       };
       if (privateKey != null && privateKey.isNotEmpty) {
         body['privateKey'] = privateKey;
+      }
+      if (backupKey != null && backupKey.isNotEmpty) {
+        body['backupKey'] = backupKey;
       }
 
       final response = await http.put(
