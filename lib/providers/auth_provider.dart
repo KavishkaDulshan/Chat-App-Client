@@ -4,6 +4,9 @@ import '../services/auth_service.dart';
 import '../services/e2ee_service.dart';
 import '../providers/socket_provider.dart';
 import '../providers/local_db_provider.dart';
+import '../providers/conversations_provider.dart';
+import '../providers/contact_provider.dart';
+import '../providers/chat_provider.dart';
 
 class AuthState {
   final User? user;
@@ -142,10 +145,18 @@ class AuthController extends Notifier<AuthState> {
 
       // 3. Try to notify server
       await ref.read(authServiceProvider).logout();
+
+      // 4. Wipe encryption keys and caches
+      await ref.read(e2eeServiceProvider).clearIdentity();
+
+      // 5. Invalidate dependent providers to clear memory
+      ref.invalidate(conversationsProvider);
+      ref.invalidate(contactProvider);
+      ref.invalidate(chatProvider);
     } catch (e) {
       print("Logout Warning: $e");
     } finally {
-      // 4. ALWAYS clear local state, even if errors occur above
+      // 6. ALWAYS clear local state, even if errors occur above
       state = AuthState();
     }
   }

@@ -114,7 +114,7 @@ class E2eeService {
     // If the stored keys belong to a different user, clear them.
     final ownerUserId = await _storage.read(key: _keyOwnerStorageKey);
     if (ownerUserId != null && ownerUserId != userId) {
-      await _clearIdentity();
+      await clearIdentity();
     }
 
     // ──────────────────────────────────────────────────────
@@ -329,10 +329,15 @@ class E2eeService {
     return derivedKey;
   }
 
-  Future<void> _clearIdentity() async {
+  Future<void> clearIdentity() async {
     await _storage.delete(key: _privateKeyStorageKey);
     await _storage.delete(key: _publicKeyStorageKey);
     await _storage.delete(key: _keyOwnerStorageKey);
     await _storage.delete(key: _backupKeyStorageKey);
+    
+    // Clear in-memory caches to prevent data leakage across users
+    _cachedPrivateKeyBytes = null;
+    _cachedPublicKeyBytes = null;
+    _conversationKeyCache.clear();
   }
 }

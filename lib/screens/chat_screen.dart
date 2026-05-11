@@ -178,6 +178,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 16, vertical: 20),
                         itemCount: chatState.messages.length,
+                        cacheExtent: 300, // Reduce off-screen rendering for low-end devices
+                        addAutomaticKeepAlives: false, // Don't keep off-screen items alive
                         itemBuilder: (context, index) {
                           final msg = chatState.messages[chatState.messages.length - 1 - index];
                           final isMe = msg['sender_id'] == myUserId;

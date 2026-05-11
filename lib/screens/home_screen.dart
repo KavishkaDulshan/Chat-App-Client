@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -20,6 +21,7 @@ class HomeScreen extends ConsumerStatefulWidget {
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   final TextEditingController _searchController = TextEditingController();
+  Timer? _searchDebounce;
 
   @override
   void initState() {
@@ -32,6 +34,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -189,8 +192,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             color: AppTheme.background,
             child: TextField(
               controller: _searchController,
-              onChanged: (val) =>
-                  ref.read(conversationsProvider.notifier).searchUsers(val),
+              onChanged: (val) {
+                setState(() {}); // Update clear icon visibility
+                _searchDebounce?.cancel();
+                if (val.isEmpty) {
+                  // Clear search immediately
+                  ref.read(conversationsProvider.notifier).searchUsers(val);
+                } else {
+                  _searchDebounce = Timer(const Duration(milliseconds: 400), () {
+                    ref.read(conversationsProvider.notifier).searchUsers(val);
+                  });
+                }
+              },
               style: const TextStyle(color: AppTheme.textPrimary),
               decoration: InputDecoration(
                 hintText: "Search for people...",
@@ -247,6 +260,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     ? _buildEmptyState()
                     : ListView.builder(
                         itemCount: convState.conversations.length,
+                        cacheExtent: 300,
+                        addAutomaticKeepAlives: false,
                         itemBuilder: (context, index) {
                           final conversation = convState.conversations[index];
                           return _buildConversationTile(conversation);

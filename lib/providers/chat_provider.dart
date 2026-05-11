@@ -59,7 +59,7 @@ class ChatState {
   }
 }
 
-final chatProvider = NotifierProvider.autoDispose<ChatController, ChatState>(
+final chatProvider = NotifierProvider<ChatController, ChatState>(
   ChatController.new,
 );
 
@@ -230,10 +230,11 @@ class ChatController extends Notifier<ChatState> {
         _peerPublicKey = await _fetchPeerPublicKey(_activeOtherUserId);
       }
 
-      // Decrypt all messages
-      final hydratedHistory = await Future.wait(
-        historyList.map(_hydrateMessageForDisplay),
-      );
+      // Decrypt messages SEQUENTIALLY to avoid CPU starvation on low-end devices
+      final hydratedHistory = <Map<String, dynamic>>[];
+      for (final msg in historyList) {
+        hydratedHistory.add(await _hydrateMessageForDisplay(msg));
+      }
 
       // Only update if still in same room
       if (state.activeRoomId == incomingRoomId) {
@@ -261,9 +262,10 @@ class ChatController extends Notifier<ChatState> {
                 .toList()
           : <Map<String, dynamic>>[];
 
-      final hydratedMessages = await Future.wait(
-        messagesList.map(_hydrateMessageForDisplay),
-      );
+      final hydratedMessages = <Map<String, dynamic>>[];
+      for (final msg in messagesList) {
+        hydratedMessages.add(await _hydrateMessageForDisplay(msg));
+      }
 
       state = state.copyWith(
         messages: [...hydratedMessages, ...state.messages],

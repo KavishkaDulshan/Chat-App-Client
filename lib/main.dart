@@ -43,6 +43,8 @@ class ChatApp extends ConsumerStatefulWidget {
 }
 
 class _ChatAppState extends ConsumerState<ChatApp> with WidgetsBindingObserver {
+  DateTime? _lastResumeTime;
+
   @override
   void initState() {
     super.initState();
@@ -61,6 +63,14 @@ class _ChatAppState extends ConsumerState<ChatApp> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      // Debounce: only refresh if >5 seconds since last resume
+      final now = DateTime.now();
+      if (_lastResumeTime != null &&
+          now.difference(_lastResumeTime!).inSeconds < 5) {
+        return;
+      }
+      _lastResumeTime = now;
+
       final user = ref.read(authProvider).user;
       if (user != null) {
         // App resumed from background on mobile.

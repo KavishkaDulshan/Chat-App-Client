@@ -9,7 +9,7 @@ import '../providers/auth_provider.dart';
 import '../providers/local_db_provider.dart';
 import '../providers/chat_provider.dart';
 
-// Cache for peer public keys to avoid redundant API calls
+// Cache for peer public keys to avoid redundant API calls (capped at 50)
 final _peerKeyCache = <String, String>{};
 
 class ConversationState {
@@ -60,6 +60,10 @@ class ConversationsNotifier extends Notifier<ConversationState> {
     final key =
         await ref.read(authServiceProvider).getUserE2EEPublicKey(peerUserId);
     if (key != null && key.isNotEmpty) {
+      // Cap cache at 50 entries to limit memory on low-end devices
+      if (_peerKeyCache.length >= 50) {
+        _peerKeyCache.remove(_peerKeyCache.keys.first);
+      }
       _peerKeyCache[peerUserId] = key;
     }
     return key;
@@ -139,27 +143,25 @@ class ConversationsNotifier extends Notifier<ConversationState> {
           .map((item) => Conversation.fromHistory(item as Map<String, dynamic>))
           .toList();
 
-      // ── Decrypt E2E previews ──
+      // ── Decrypt E2E previews SEQUENTIALLY to avoid CPU starvation ──
       final myUserId = ref.read(authProvider).user?.id;
       if (myUserId != null) {
-        serverList = await Future.wait(
-          serverList.map((conv) async {
-            if (conv.lastMessageIsEncrypted && !conv.lastMessageIsDeleted) {
-              final decrypted = await _tryDecryptPreview(
-                ciphertext: conv.lastMessage,
-                myUserId: myUserId,
-                peerUserId: conv.otherUserId,
+        for (int i = 0; i < serverList.length; i++) {
+          final conv = serverList[i];
+          if (conv.lastMessageIsEncrypted && !conv.lastMessageIsDeleted) {
+            final decrypted = await _tryDecryptPreview(
+              ciphertext: conv.lastMessage,
+              myUserId: myUserId,
+              peerUserId: conv.otherUserId,
+            );
+            if (decrypted != null) {
+              serverList[i] = conv.copyWith(
+                lastMessage: decrypted,
+                lastMessageIsEncrypted: false,
               );
-              if (decrypted != null) {
-                return conv.copyWith(
-                  lastMessage: decrypted,
-                  lastMessageIsEncrypted: false,
-                );
-              }
             }
-            return conv;
-          }),
-        );
+          }
+        }
       }
 
       // ── MERGE: keep any socket-added conversations not yet in server data ──
