@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../providers/auth_provider.dart';
 import '../providers/chat_provider.dart';
+import '../providers/conversations_provider.dart';
 import '../widgets/message_bubble.dart';
 import '../app_theme.dart';
 import '../services/audio_service.dart';
@@ -39,10 +40,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   @override
   void initState() {
     super.initState();
+
+    // Mark this room as actively viewed — uses top-level variable, no ref issues.
+    currentlyViewingRoomId = widget.roomId;
+
     Future.microtask(() {
       ref
           .read(chatProvider.notifier)
           .joinChat(widget.roomId, widget.otherUserId, widget.initialHistory);
+      // Also reset the badge immediately
+      ref.read(conversationsProvider.notifier).resetUnreadCount(widget.roomId);
     });
     _scrollController.addListener(_onScroll);
   }
@@ -73,9 +80,23 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   @override
   void dispose() {
     _scrollController.removeListener(_onScroll);
-    _audioService.dispose(); // Clean up audio resources
+    _audioService.dispose();
     _messageController.dispose();
     _scrollController.dispose();
+
+    // Clear the "currently viewing" flag — plain variable, no ref needed.
+    // This is 100% safe in dispose() since it's just a top-level assignment.
+    currentlyViewingRoomId = '';
+
+    // Also clear chatProvider's activeRoomId so its message handler stops
+    // matching messages from this room and emitting phantom conversation:read.
+    // ref.read() on a Notifier field (not state) is safe before super.dispose().
+    try {
+      ref.read(chatProvider.notifier).clearActiveRoom();
+    } catch (_) {
+      // Silently handle edge cases where ref is already invalidated
+    }
+
     super.dispose();
   }
 

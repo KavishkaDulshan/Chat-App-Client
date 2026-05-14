@@ -94,9 +94,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ),
     ).then((_) {
       _searchController.clear();
-      if (_searchController.text.isEmpty) {
-        ref.read(conversationsProvider.notifier).loadChats();
-      }
+      // After returning from chat: reset ONLY this room's unread count.
+      // Do NOT call loadChats(forceRefresh: true) here — it overwrites the
+      // entire conversation state with server data, which wipes out
+      // socket-accumulated unread counts for OTHER chats.
+      ref.read(conversationsProvider.notifier).resetUnreadCount(roomId);
+      // Also reset by otherUserId in case the room ID format differs
+      ref.read(conversationsProvider.notifier).resetUnreadCount(conv.otherUserId);
     });
   }
 
@@ -640,6 +644,10 @@ class _ContactActionButtonState extends ConsumerState<_ContactActionButton> {
     final ids = [myUser.id, widget.conv.otherUserId];
     ids.sort();
     final roomId = ids.join('_');
+
+    // Reset unread count instantly
+    ref.read(conversationsProvider.notifier).resetUnreadCount(roomId);
+
     Navigator.push(
       context,
       MaterialPageRoute(

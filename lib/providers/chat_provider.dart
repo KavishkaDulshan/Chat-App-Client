@@ -146,6 +146,13 @@ class ChatController extends Notifier<ChatState> {
     _socket.emit('join_private_chat', otherUserId);
   }
 
+  /// Called from ChatScreen.dispose() to stop this handler from matching
+  /// messages for the old room and emitting phantom conversation:read events.
+  void clearActiveRoom() {
+    state = state.copyWith(activeRoomId: '');
+    _activeOtherUserId = '';
+  }
+
   /// BUG-1: Load older messages (cursor-based pagination)
   Future<void> loadMoreMessages() async {
     if (state.isLoadingMore || !state.hasMoreMessages || state.messages.isEmpty) return;

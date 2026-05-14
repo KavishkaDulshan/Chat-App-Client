@@ -7,10 +7,14 @@ import '../services/local_db/database.dart';
 import '../providers/socket_provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/local_db_provider.dart';
-import '../providers/chat_provider.dart';
 
 // Cache for peer public keys to avoid redundant API calls (capped at 50)
 final _peerKeyCache = <String, String>{};
+
+/// Global variable tracking which room the user is currently viewing.
+/// Set directly by ChatScreen (no ref needed), read by socket handlers.
+/// This avoids all Riverpod lifecycle issues with ref.read in dispose.
+String currentlyViewingRoomId = '';
 
 class ConversationState {
   final List<Conversation> conversations;
@@ -315,15 +319,17 @@ class ConversationsNotifier extends Notifier<ConversationState> {
     }
 
     int currentUnreadCount = existingConv?.unreadCount ?? 0;
-    
-    // Check if we are currently inside this room
-    final activeRoomId = ref.read(chatProvider).activeRoomId;
-    final isCurrentlyInRoom = activeRoomId.isNotEmpty && 
-        (activeRoomId == roomId || activeRoomId.contains(targetOtherUserId));
-        
+
+    // Check if the user is currently ACTIVELY VIEWING this room.
+    // Uses a top-level variable set directly by ChatScreen — no ref needed.
+    final isCurrentlyInRoom = currentlyViewingRoomId.isNotEmpty &&
+        (currentlyViewingRoomId == roomId ||
+         currentlyViewingRoomId == targetOtherUserId);
+
     if (senderId != myId && !isCurrentlyInRoom) {
       currentUnreadCount += 1;
     } else if (isCurrentlyInRoom) {
+      // User is actively viewing — keep count at 0
       currentUnreadCount = 0;
     }
 
