@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../providers/auth_provider.dart';
 import '../services/auth_service.dart';
+import '../services/e2ee_service.dart';
 import '../app_theme.dart';
 
 class ResetPasswordScreen extends ConsumerStatefulWidget {
@@ -60,6 +60,11 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
     setState(() => _isLoading = false);
 
     if (success) {
+      // IMPORTANT: Clear the stale backup key so the next login re-derives
+      // from the new password (matches the server's re-encrypted private key).
+      await ref.read(e2eeServiceProvider).clearBackupKeyOnly();
+
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Password reset successfully! Please log in.')),
       );

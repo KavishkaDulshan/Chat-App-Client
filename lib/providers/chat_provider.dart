@@ -146,6 +146,14 @@ class ChatController extends Notifier<ChatState> {
     _socket.emit('join_private_chat', otherUserId);
   }
 
+  /// Called by auth_provider when the socket reconnects after a gap.
+  /// Re-emits join_private_chat for the active room to fetch any missed messages.
+  void resyncActiveRoom() {
+    if (state.activeRoomId.isEmpty || _activeOtherUserId.isEmpty) return;
+    print('🔄 Resyncing active room: ${state.activeRoomId}');
+    _socket.emit('join_private_chat', _activeOtherUserId);
+  }
+
   /// Called from ChatScreen.dispose() to stop this handler from matching
   /// messages for the old room and emitting phantom conversation:read events.
   void clearActiveRoom() {
@@ -222,8 +230,7 @@ class ChatController extends Notifier<ChatState> {
                 .toList()
           : <Map<String, dynamic>>[];
 
-      // ── Do NOT replace cached messages with raw server ciphertext ──
-      // Just update hasMore and mark loading done. Decrypt in background.
+      // Update hasMore and mark loading done
       state = state.copyWith(
         activeRoomId: incomingRoomId,
         hasMoreMessages: hasMore,
@@ -232,7 +239,7 @@ class ChatController extends Notifier<ChatState> {
 
       _socket.emit('conversation:read', {'roomId': incomingRoomId});
 
-      // Wait for peer key if not yet available (fetched in parallel in joinChat)
+      // Wait for peer key if not yet available
       if (_peerPublicKey == null && _activeOtherUserId.isNotEmpty) {
         _peerPublicKey = await _fetchPeerPublicKey(_activeOtherUserId);
       }
@@ -244,14 +251,35 @@ class ChatController extends Notifier<ChatState> {
       }
 
       // Only update if still in same room
-      if (state.activeRoomId == incomingRoomId) {
-        state = state.copyWith(
-          messages: hydratedHistory,
-          isLoading: false,
-        );
-      }
+      if (state.activeRoomId != incomingRoomId) return;
 
-      _cacheMessages(hydratedHistory, incomingRoomId);
+      // MERGE by _id: combine existing cached messages with server messages.
+      // This fills any gap (messages received while disconnected) without creating duplicates.
+      final existingIds = state.messages
+          .where((m) => m['_id'] != null)
+          .map((m) => m['_id'].toString())
+          .toSet();
+
+      final newMessages = hydratedHistory
+          .where((m) => m['_id'] != null && !existingIds.contains(m['_id'].toString()))
+          .toList();
+
+      if (newMessages.isNotEmpty) {
+        // Merge: existing cache + new messages, sorted by createdAt
+        final merged = [...state.messages, ...newMessages];
+        merged.sort((a, b) {
+          final ta = DateTime.tryParse(a['createdAt']?.toString() ?? '') ?? DateTime(0);
+          final tb = DateTime.tryParse(b['createdAt']?.toString() ?? '') ?? DateTime(0);
+          return ta.compareTo(tb);
+        });
+        state = state.copyWith(messages: merged, isLoading: false);
+        _cacheMessages(newMessages, incomingRoomId);
+      } else if (state.messages.isEmpty) {
+        // No existing cache — use server history directly
+        state = state.copyWith(messages: hydratedHistory, isLoading: false);
+        _cacheMessages(hydratedHistory, incomingRoomId);
+      }
+      // If messages exist and no new ones, nothing to do (gap was empty)
     };
 
     _moreMessagesHandler = (data) async {

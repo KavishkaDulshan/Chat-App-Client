@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/auth_provider.dart';
+import '../services/auth_service.dart';
 import '../app_theme.dart';
 
 class OtpVerificationScreen extends ConsumerStatefulWidget {
@@ -30,15 +31,136 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
       return;
     }
 
-    // Call Provider
     final success = await ref
         .read(authProvider.notifier)
         .verifyOTP(widget.email, otp, widget.password);
 
     if (success && mounted) {
-      // Navigate to Home and remove all previous routes
-      Navigator.of(context).popUntil((route) => route.isFirst);
+      // After successful registration, prompt user to set up a Recovery PIN.
+      // This provides a password-independent way to recover E2EE keys.
+      await _showRecoveryPinDialog();
+
+      if (mounted) {
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
     }
+  }
+
+  Future<void> _showRecoveryPinDialog() async {
+    final pinController = TextEditingController();
+    bool isSettingPin = false;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return StatefulBuilder(builder: (ctx, setDialogState) {
+          return AlertDialog(
+            backgroundColor: AppTheme.cardColor,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            title: const Row(
+              children: [
+                Icon(Icons.security_rounded, color: AppTheme.primary, size: 26),
+                SizedBox(width: 8),
+                Text(
+                  'Recovery PIN',
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 18,
+                  ),
+                ),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Set a 6-digit PIN to recover your encrypted messages if you forget your password or switch devices.',
+                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: pinController,
+                  keyboardType: TextInputType.number,
+                  maxLength: 6,
+                  obscureText: true,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 24,
+                    letterSpacing: 8,
+                    color: AppTheme.textPrimary,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  decoration: AppTheme.inputDecoration('000000').copyWith(
+                    counterText: '',
+                    contentPadding: const EdgeInsets.symmetric(vertical: 16),
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: isSettingPin
+                    ? null
+                    : () => Navigator.of(ctx).pop(),
+                child: Text(
+                  'Skip for now',
+                  style: TextStyle(color: AppTheme.textSecondary),
+                ),
+              ),
+              ElevatedButton(
+                onPressed: isSettingPin
+                    ? null
+                    : () async {
+                        final pin = pinController.text.trim();
+                        if (pin.length != 6 || !RegExp(r'^\d{6}$').hasMatch(pin)) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Please enter exactly 6 digits')),
+                          );
+                          return;
+                        }
+                        setDialogState(() => isSettingPin = true);
+                        final success = await ref
+                            .read(authServiceProvider)
+                            .setRecoveryPin(pin);
+                        if (ctx.mounted) {
+                          Navigator.of(ctx).pop();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                success
+                                    ? '✅ Recovery PIN set successfully!'
+                                    : '⚠️ Could not save PIN. You can set it later in settings.',
+                              ),
+                            ),
+                          );
+                        }
+                      },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primary,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                child: isSettingPin
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 2,
+                        ),
+                      )
+                    : const Text('Set PIN'),
+              ),
+            ],
+          );
+        });
+      },
+    );
   }
 
   @override
@@ -51,7 +173,9 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
         backgroundColor: AppTheme.background,
         elevation: 0,
         iconTheme: IconThemeData(color: AppTheme.textPrimary),
-        title: Text("Verify Email", style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.bold)),
+        title: Text("Verify Email",
+            style: TextStyle(
+                color: AppTheme.textPrimary, fontWeight: FontWeight.bold)),
         centerTitle: true,
       ),
       body: SafeArea(

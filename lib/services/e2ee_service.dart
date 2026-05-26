@@ -29,11 +29,20 @@ class E2eeService {
 
   /// Derives or retrieves the client-side AES key used to encrypt the private key
   /// before it is backed up to the server.
-  Future<String?> getOrDeriveBackupKey({String? password, String? salt}) async {
-    // 1. Try secure storage first
-    final existing = await _storage.read(key: _backupKeyStorageKey);
-    if (existing != null && existing.isNotEmpty) {
-      return existing;
+  ///
+  /// [forceRederive]: when true, ignore any cached key in storage and re-derive
+  /// from the provided password + salt. Use this after a password reset.
+  Future<String?> getOrDeriveBackupKey({
+    String? password,
+    String? salt,
+    bool forceRederive = false,
+  }) async {
+    // 1. Try secure storage first (unless forced to rederive)
+    if (!forceRederive) {
+      final existing = await _storage.read(key: _backupKeyStorageKey);
+      if (existing != null && existing.isNotEmpty) {
+        return existing;
+      }
     }
 
     // 2. If we have credentials (during manual login/registration), derive key
@@ -327,6 +336,15 @@ class E2eeService {
 
     _conversationKeyCache[cacheKey] = derivedKey;
     return derivedKey;
+  }
+
+  /// Delete ONLY the cached backup key from secure storage.
+  /// Does NOT delete the key pair itself.
+  /// Call this after a password reset so that on the next login,
+  /// getOrDeriveBackupKey() re-derives from the new password.
+  Future<void> clearBackupKeyOnly() async {
+    await _storage.delete(key: _backupKeyStorageKey);
+    print('E2EE: Backup key cleared — will re-derive on next login.');
   }
 
   Future<void> clearIdentity() async {

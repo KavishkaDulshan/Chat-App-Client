@@ -1,9 +1,10 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../models/user_model.dart';
 import '../services/auth_service.dart';
-import '../services/e2ee_service.dart';
+import '../services/api_client.dart';
+import '../services/session_bootstrap_service.dart';
 import '../providers/socket_provider.dart';
-import '../providers/local_db_provider.dart';
 import '../providers/conversations_provider.dart';
 import '../providers/contact_provider.dart';
 import '../providers/chat_provider.dart';
@@ -27,105 +28,146 @@ final authProvider = NotifierProvider<AuthController, AuthState>(
 );
 
 class AuthController extends Notifier<AuthState> {
-  Future<void> _bootstrapE2EE(User user, {String? password}) async {
-    try {
-      final e2eeService = ref.read(e2eeServiceProvider);
-      final authService = ref.read(authServiceProvider);
-
-      // Derive or retrieve the AES lookup key for E2E backup
-      final backupKeyB64 = await e2eeService.getOrDeriveBackupKey(
-        password: password,
-        salt: user.email,
-      );
-
-      // ensureIdentityKeyForUser will:
-      //   1. Use local keys if available
-      //   2. Restore from server (decrypting if backupKeyB64 is provided)
-      //   3. Generate new keys only as a last resort
-      final publicKey = await e2eeService.ensureIdentityKeyForUser(
-        user.id,
-        serverKeyFetcher: () => authService.fetchMyE2EEKeyPair(),
-        backupKeyB64: backupKeyB64,
-      );
-
-      // We must encrypt the private key before upload
-      String? privateKeyToUpload = await e2eeService.getMyPrivateKey();
-      if (privateKeyToUpload != null && backupKeyB64 != null) {
-        final encryptedPriv = await e2eeService.encryptPrivateKeyBackup(privateKeyToUpload, backupKeyB64);
-        if (encryptedPriv != null) {
-          privateKeyToUpload = encryptedPriv;
-        }
-      }
-
-      await authService.uploadE2EEPublicKey(
-        publicKey,
-        privateKey: privateKeyToUpload,
-        backupKey: backupKeyB64,
-      );
-    } catch (e) {
-      print('E2EE Bootstrap Warning: $e');
-    }
-  }
+  final _storage = const FlutterSecureStorage();
 
   @override
   AuthState build() {
+    // Register the forced-logout callback with ApiClient so it can trigger
+    // logout when a token refresh fails inside the Dio interceptor.
+    onForceLogout = _handleForceLogout;
     return AuthState(isInitializing: true);
   }
 
-  // Helper to connect socket
-  void _connectSocket(User user) {
-    final socketService = ref.read(socketServiceProvider);
-    socketService.connect(user, () {
-      print("Socket Connected via AuthProvider");
-    });
+  // ─── Socket auth error → try refresh → reconnect or logout ───────────────
+  Future<void> _handleSocketAuthError(String errorCode) async {
+    print('⚠️ Socket auth error: $errorCode');
+    if (errorCode == 'TOKEN_EXPIRED') {
+      await _tryRefreshThenReconnect();
+    } else {
+      // Truly invalid token — force logout
+      await logout();
+    }
   }
 
-  // Helper to initialize local database for the logged-in user
-  Future<void> _initLocalDatabase(User user) async {
-    final db = await initLocalDb(user.id);
-    ref.read(localDbProvider.notifier).state = db;
+  Future<void> _tryRefreshThenReconnect() async {
+    try {
+      final refreshToken = await _storage.read(key: 'refresh_token');
+      if (refreshToken == null) {
+        await logout();
+        return;
+      }
+
+      final authService = ref.read(authServiceProvider);
+      // Use the silent refresh path in auth_service
+      // We call silently — if it updates secure storage we'll read the new token
+      final newToken = await authService.tryAutoLogin();
+      if (newToken == null) {
+        await logout();
+        return;
+      }
+
+      // Re-read the fresh access token from secure storage
+      final freshToken = await _storage.read(key: 'jwt_token');
+      if (freshToken == null) {
+        await logout();
+        return;
+      }
+
+      // Reconnect socket with the new token
+      ref.read(socketServiceProvider).reconnectWithNewToken(freshToken);
+      print('✅ Socket reconnected with refreshed token');
+    } catch (e) {
+      print('Token refresh + reconnect failed: $e');
+      await logout();
+    }
   }
 
+  /// Called by ApiClient.onForceLogout when a Dio interceptor refresh fails.
+  void _handleForceLogout() {
+    print('⚠️ Forced logout triggered by token refresh failure');
+    // Schedule on next microtask to avoid calling during a build cycle
+    Future.microtask(() => logout());
+  }
+
+  // ─── Socket reconnect → resync data ──────────────────────────────────────
+  void _handleSocketReconnected() {
+    print('🔄 Socket reconnected — resyncing data');
+    try {
+      ref.read(conversationsProvider.notifier).loadChats(forceRefresh: true);
+    } catch (_) {}
+    try {
+      ref.read(chatProvider.notifier).resyncActiveRoom();
+    } catch (_) {}
+  }
+
+  // ─── Check auth status (app start) ───────────────────────────────────────
   Future<void> checkAuthStatus() async {
     state = AuthState(isInitializing: true);
     final authService = ref.read(authServiceProvider);
     final user = await authService.tryAutoLogin();
 
     if (user != null) {
-      // ── Show home screen IMMEDIATELY from local data ──
-      // The user sees the UI now. E2EE + DB init run in background.
-      _connectSocket(user);
+      // Show home screen immediately from local data
       state = AuthState(user: user, isLoading: false);
 
-      // ── Background: DB init + E2EE bootstrap in parallel ──
-      await Future.wait([
-        _initLocalDatabase(user),
-        _bootstrapE2EE(user), // uses cached backup key from secure storage
-      ]);
+      // Initialize session in background
+      await ref.read(sessionBootstrapServiceProvider).initSession(
+        user,
+        onSocketAuthError: _handleSocketAuthError,
+        onSocketReconnected: _handleSocketReconnected,
+      );
     } else {
       state = AuthState(isInitializing: false, isLoading: false);
     }
   }
 
+  // ─── Login ────────────────────────────────────────────────────────────────
   Future<void> login(String email, String password) async {
     state = AuthState(isLoading: true);
     final authService = ref.read(authServiceProvider);
     final user = await authService.login(email, password);
 
     if (user != null) {
-      // Pass the password to bootstrap so we can derive the key
-      await _bootstrapE2EE(user, password: password);
-      _connectSocket(user);
-      await _initLocalDatabase(user);
+      await ref.read(sessionBootstrapServiceProvider).initSession(
+        user,
+        password: password,
+        onSocketAuthError: _handleSocketAuthError,
+        onSocketReconnected: _handleSocketReconnected,
+      );
       state = AuthState(user: user, isLoading: false, isInitializing: false);
     } else {
       state = AuthState(
         isLoading: false,
-        errorMessage: "Login Failed. Check credentials.",
+        errorMessage: 'Login Failed. Check credentials.',
       );
     }
   }
 
+  // ─── Verify OTP (new registration) ───────────────────────────────────────
+  Future<bool> verifyOTP(String email, String otp, String password) async {
+    state = AuthState(isLoading: true);
+    final authService = ref.read(authServiceProvider);
+    final user = await authService.verifyOTP(email, otp);
+
+    if (user != null) {
+      await ref.read(sessionBootstrapServiceProvider).initSession(
+        user,
+        password: password,
+        onSocketAuthError: _handleSocketAuthError,
+        onSocketReconnected: _handleSocketReconnected,
+      );
+      state = AuthState(user: user, isLoading: false);
+      return true;
+    } else {
+      state = AuthState(
+        isLoading: false,
+        errorMessage: 'Invalid OTP or Expired.',
+      );
+      return false;
+    }
+  }
+
+  // ─── Sign Up ──────────────────────────────────────────────────────────────
   Future<bool> signUp(String username, String email, String password) async {
     state = AuthState(isLoading: true);
     final authService = ref.read(authServiceProvider);
@@ -134,52 +176,25 @@ class AuthController extends Notifier<AuthState> {
     return success;
   }
 
+  // ─── Logout ───────────────────────────────────────────────────────────────
   Future<void> logout() async {
     try {
-      // 1. Close local database
-      await closeLocalDb(ref.read(localDbProvider));
-      ref.read(localDbProvider.notifier).state = null;
+      // 1. Teardown session (DB + socket + E2EE)
+      await ref.read(sessionBootstrapServiceProvider).teardownSession();
 
-      // 2. Try to disconnect socket
-      ref.read(socketServiceProvider).disconnect();
-
-      // 3. Try to notify server
+      // 2. Tell server to invalidate this device's refresh token
       await ref.read(authServiceProvider).logout();
 
-      // 4. Wipe encryption keys and caches
-      await ref.read(e2eeServiceProvider).clearIdentity();
-
-      // 5. Invalidate dependent providers to clear memory
+      // 3. Invalidate dependent providers to clear in-memory state
+      //    This is now safe because the socket is already disconnected in teardownSession
       ref.invalidate(conversationsProvider);
       ref.invalidate(contactProvider);
       ref.invalidate(chatProvider);
     } catch (e) {
-      print("Logout Warning: $e");
+      print('Logout Warning: $e');
     } finally {
-      // 6. ALWAYS clear local state, even if errors occur above
+      // ALWAYS clear local state, even if errors occur above
       state = AuthState();
-    }
-  }
-
-  Future<bool> verifyOTP(String email, String otp, String password) async {
-    state = AuthState(isLoading: true);
-    final authService = ref.read(authServiceProvider);
-
-    final user = await authService.verifyOTP(email, otp);
-
-    if (user != null) {
-      // Pass the password to bootstrap so we can derive the key
-      await _bootstrapE2EE(user, password: password);
-      _connectSocket(user);
-      await _initLocalDatabase(user);
-      state = AuthState(user: user, isLoading: false);
-      return true;
-    } else {
-      state = AuthState(
-        isLoading: false,
-        errorMessage: "Invalid OTP or Expired.",
-      );
-      return false;
     }
   }
 
