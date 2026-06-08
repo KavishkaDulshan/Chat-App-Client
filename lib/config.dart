@@ -3,7 +3,7 @@ import 'package:flutter/foundation.dart'; // <--- USE THIS, NOT dart:io
 class AppConfig {
   static const bool isProduction = true;
   static const String productionUrl =
-      'https://blinkchat.uaenorth.cloudapp.azure.com';
+      'http://blinkchat.uaenorth.cloudapp.azure.com';
 
   static String get baseUrl {
     if (isProduction) {

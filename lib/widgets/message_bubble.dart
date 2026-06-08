@@ -120,8 +120,6 @@ class MessageBubble extends StatelessWidget {
           borderRadius: BorderRadius.circular(12),
           child: CachedNetworkImage(
             imageUrl: text,
-            maxWidthDiskCache: 800,
-            maxHeightDiskCache: 800,
             fit: BoxFit.contain,
             placeholder: (ctx, url) => const SizedBox(
               width: 150, height: 150,
@@ -187,8 +185,6 @@ class MessageBubble extends StatelessWidget {
 
     return CachedNetworkImage(
       imageUrl: senderAvatar!,
-      maxWidthDiskCache: 96,
-      maxHeightDiskCache: 96,
       memCacheWidth: 32,
       memCacheHeight: 32,
       imageBuilder: (context, imageProvider) => CircleAvatar(

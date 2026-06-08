@@ -57,9 +57,9 @@ class Conversation {
   factory Conversation.fromSearch(Map<String, dynamic> userJson) {
     return Conversation(
       id: '',
-      otherUserId: userJson['_id'] ?? userJson['id'],
-      otherUserName: userJson['username'],
-      otherUserAvatar: userJson['profile_pic'],
+      otherUserId: userJson['_id']?.toString() ?? userJson['id']?.toString() ?? '',
+      otherUserName: userJson['username']?.toString() ?? 'Unknown',
+      otherUserAvatar: userJson['profile_pic']?.toString(),
       isOnline: userJson['is_online'] == true,
       lastMessage: 'Tap to chat',
       contactStatus: userJson['contactStatus']?.toString() ?? 'none',

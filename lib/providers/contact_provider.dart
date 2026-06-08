@@ -50,11 +50,15 @@ class ContactNotifier extends Notifier<ContactState> {
   }
 
   void _removeSocketListeners() {
-    final socket = ref.read(socketServiceProvider).socket;
-    socket.off('contact:request_received');
-    socket.off('contact:request_sent');
-    socket.off('contact:request_accepted');
-    socket.off('contact:request_declined');
+    try {
+      final socket = ref.read(socketServiceProvider).socket;
+      socket.off('contact:request_received');
+      socket.off('contact:request_sent');
+      socket.off('contact:request_accepted');
+      socket.off('contact:request_declined');
+    } catch (_) {
+      // Socket may not be initialized yet — safe to ignore
+    }
     _socketListening = false;
   }
 

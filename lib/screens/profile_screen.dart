@@ -81,22 +81,59 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
     setState(() => _isUploading = true);
 
-    final String? imageUrl = await imageService.uploadProfileImage(file);
+    try {
+      final String? imageUrl = await imageService.uploadProfileImage(file);
+      print('DEBUG: uploadProfileImage returned url: $imageUrl');
 
-    if (imageUrl != null) {
-      final updatedUser = await authService.updateProfile(imageUrl: imageUrl);
+      if (imageUrl != null && imageUrl.isNotEmpty) {
+        final updatedUser = await authService.updateProfile(imageUrl: imageUrl);
+        print('DEBUG: updateProfile returned user: ${updatedUser?.profilePic}');
 
-      if (updatedUser != null) {
-        ref.read(authProvider.notifier).checkAuthStatus();
+        if (updatedUser != null) {
+          // Directly update local state — do NOT call checkAuthStatus() which
+          // reads stale secure storage and overwrites the freshly updated user.
+          ref.read(authProvider.notifier).setUser(updatedUser);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Profile picture updated successfully!'),
+                backgroundColor: Colors.green,
+              ),
+            );
+          }
+        } else {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Failed to save profile picture. Try again.'),
+                backgroundColor: Colors.redAccent,
+              ),
+            );
+          }
+        }
+      } else {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Profile updated successfully!")),
+            const SnackBar(
+              content: Text('Failed to upload image. Try again.'),
+              backgroundColor: Colors.redAccent,
+            ),
           );
         }
       }
+    } catch (e) {
+      print('ERROR in _pickAndUploadImage: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Upload error: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isUploading = false);
     }
-
-    setState(() => _isUploading = false);
   }
 
   @override
@@ -140,8 +177,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       child: (user?.profilePic != null && user!.profilePic!.isNotEmpty)
                           ? CachedNetworkImage(
                               imageUrl: user.profilePic!,
-                              maxWidthDiskCache: 256,
-                              maxHeightDiskCache: 256,
                               imageBuilder: (context, imageProvider) => CircleAvatar(
                                 radius: 64,
                                 backgroundImage: imageProvider,

@@ -188,8 +188,19 @@ class AuthService {
       final response = await _dio.get('/search', queryParameters: {'username': query});
       if (response.statusCode == 200) {
         final data = response.data;
+        // Guard against nginx returning HTML (SPA fallback) instead of JSON
         if (data is List) return data;
+        if (data is String && data.trim().startsWith('<')) {
+          print('Search: server returned HTML — nginx misconfiguration: '
+              'GET /search is served as a static file, not proxied to the API.');
+          return [];
+        }
+        print('Search: unexpected response type: ${data.runtimeType}');
+      } else {
+        print('Search Error: status ${response.statusCode}');
       }
+    } on DioException catch (e) {
+      print('Search DioError: ${e.response?.statusCode} - ${e.response?.data ?? e.message}');
     } catch (e) {
       print('Search Error: $e');
     }

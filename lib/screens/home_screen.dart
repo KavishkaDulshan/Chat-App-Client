@@ -521,8 +521,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
     return CachedNetworkImage(
       imageUrl: url,
-      maxWidthDiskCache: 128,
-      maxHeightDiskCache: 128,
       memCacheWidth: (radius * 2).toInt(),
       memCacheHeight: (radius * 2).toInt(),
       imageBuilder: (context, imageProvider) => CircleAvatar(
