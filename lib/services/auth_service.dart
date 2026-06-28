@@ -105,15 +105,21 @@ class AuthService {
       if (token != null && userData != null) {
         // Check if access token appears expired (basic exp decode without verify)
         if (_isTokenLikelyExpired(token) && refreshToken != null) {
-          // Silently attempt refresh before returning user
-          final newToken = await _silentRefresh(refreshToken);
-          if (newToken != null) {
-            _syncFcmToken();
-            return User.fromJson(jsonDecode(userData), newToken);
+          try {
+            // Silently attempt refresh before returning user
+            final newToken = await _silentRefresh(refreshToken);
+            if (newToken != null) {
+              _syncFcmToken();
+              return User.fromJson(jsonDecode(userData), newToken);
+            }
+            // Refresh returned null (explicitly invalid token) — clear all credentials
+            await logout();
+            return null;
+          } on NetworkException catch (e) {
+            print('Auto Login: Offline/Network issue during token refresh ($e). Returning cached user.');
+            // Allow offline mode by returning the cached user with the existing (expired) token
+            return User.fromJson(jsonDecode(userData), token);
           }
-          // Refresh failed — clear all credentials
-          await logout();
-          return null;
         }
 
         _syncFcmToken();
@@ -143,8 +149,18 @@ class AuthService {
         }
         return newAccessToken;
       }
+    } on DioException catch (e) {
+      print('Silent refresh error: $e');
+      if (e.type != DioExceptionType.badResponse) {
+        throw NetworkException('Network connection failed: ${e.message}');
+      }
+      final status = e.response?.statusCode;
+      if (status != null && status != 400 && status != 401 && status != 403) {
+        throw NetworkException('Server side error during refresh: $status');
+      }
     } catch (e) {
       print('Silent refresh error: $e');
+      throw NetworkException('Unknown error during refresh: $e');
     }
     return null;
   }

@@ -94,6 +94,11 @@ class ApiClient {
       final retryResponse = await _retry(err.requestOptions, newAccessToken);
       _drainQueue(success: true, newToken: newAccessToken);
       handler.resolve(retryResponse);
+    } on NetworkException catch (netErr) {
+      print('Network exception during interceptor refresh: $netErr');
+      _drainQueue(success: false);
+      // Reject original request but do NOT force logout!
+      handler.reject(err);
     } catch (_) {
       _drainQueue(success: false);
       _handleRefreshFailure();
@@ -127,8 +132,18 @@ class ApiClient {
         }
         return newAccessToken;
       }
+    } on DioException catch (e) {
+      print('Token refresh error: $e');
+      if (e.type != DioExceptionType.badResponse) {
+        throw NetworkException('Network connection failed: ${e.message}');
+      }
+      final status = e.response?.statusCode;
+      if (status != null && status != 400 && status != 401 && status != 403) {
+        throw NetworkException('Server side error during refresh: $status');
+      }
     } catch (e) {
       print('Token refresh error: $e');
+      throw NetworkException('Unknown error during refresh: $e');
     }
     return null;
   }
@@ -175,4 +190,11 @@ class _PendingRequest {
   final RequestOptions options;
   final Completer<Response> completer;
   _PendingRequest(this.options, this.completer);
+}
+
+class NetworkException implements Exception {
+  final String message;
+  NetworkException(this.message);
+  @override
+  String toString() => 'NetworkException: $message';
 }
