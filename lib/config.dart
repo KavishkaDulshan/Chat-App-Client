@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart'; // <--- USE THIS, NOT dart:io
 
 class AppConfig {
-  static const bool isProduction = true;
+  static const bool isProduction = false;
   static const String productionUrl =
       'http://blinkchat.uaenorth.cloudapp.azure.com';
 
@@ -12,15 +12,15 @@ class AppConfig {
 
     // 1. CHECK WEB FIRST
     if (kIsWeb) {
-      return 'http://localhost:3000'; // Chrome/Web always uses localhost
+      return 'http://localhost:80'; // Gateway (Docker) proxies to services
     }
 
     // 2. CHECK ANDROID (Using Foundation, not IO)
     if (defaultTargetPlatform == TargetPlatform.android) {
-      return 'http://10.0.2.2:3000';
+      return 'http://10.0.2.2:80';
     }
 
     // 3. IOS / WINDOWS
-    return 'http://localhost:3000';
+    return 'http://localhost:80';
   }
 }
