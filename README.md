@@ -121,3 +121,5 @@ As an actively developed project, the upcoming roadmap includes:
 * Adding WebRTC support for voice and video calling.
 * Enhancing media compression algorithms for faster image and file sharing.
 * Implementing advanced group chat administration features.
+
+Kavishka Dulshan
