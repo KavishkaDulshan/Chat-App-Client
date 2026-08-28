@@ -127,7 +127,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
     await ref.read(chatProvider.notifier).sendMessage(text);
     _messageController.clear();
-    setState(() {}); // Refresh UI (toggle Mic/Send button)
+    setState(() {}); // Refresh UI (toggle Mic/Send buttons)
     Future.delayed(const Duration(milliseconds: 100), _scrollToBottom);
   }
 
