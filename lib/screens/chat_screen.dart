@@ -136,7 +136,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final chatState = ref.watch(chatProvider);
     final myUserId = ref.watch(authProvider).user?.id;
 
-    // Auto-scroll when new messages arrive (registered once via listen, not in build)
+    // Auto scroll when new messages arrive (registered once via listen, not in build)
     ref.listen<ChatState>(chatProvider, (previous, next) {
       final prevLen = previous?.messages.length ?? 0;
       if (next.messages.length > prevLen && !next.isLoadingMore) {
